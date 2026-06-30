@@ -1,6 +1,6 @@
 # saturnswap-filler
 
-Standalone, optional reference filler library for aggregators (e.g. DexHunter) to
+Standalone, optional reference filler library for aggregators (e.g. DexHunter, SteelSwap, etc.) to
 discover SaturnSwap CLOB orders on-chain and build a **non-auth taker-fill**
 transaction **without** the SaturnSwap API.
 
