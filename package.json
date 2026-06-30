@@ -1,0 +1,48 @@
+{
+  "name": "saturnswap-filler",
+  "version": "0.1.0",
+  "description": "Standalone, optional reference filler library for discovering SaturnSwap CLOB orders on-chain and building non-auth (1% fee) taker-fill transactions. No SaturnSwap API. No SaturnSwapBackend/SaturnSwapWeb dependency.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Flux Point Studios",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Flux-Point-Studios/saturnswap-filler.git"
+  },
+  "homepage": "https://github.com/Flux-Point-Studios/saturnswap-filler#readme",
+  "bugs": {
+    "url": "https://github.com/Flux-Point-Studios/saturnswap-filler/issues"
+  },
+  "keywords": [
+    "cardano",
+    "saturnswap",
+    "clob",
+    "dex",
+    "aggregator",
+    "plutus",
+    "taker-fill"
+  ],
+  "files": [
+    "src",
+    "SPEC.md",
+    "spec.json"
+  ],
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:unit": "vitest run test/unit",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@lucid-evolution/lucid": "^0.4.29",
+    "@noble/hashes": "^1.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}

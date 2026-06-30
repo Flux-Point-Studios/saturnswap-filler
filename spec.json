@@ -1,0 +1,236 @@
+{
+  "name": "saturn_swap",
+  "title": "SaturnSwap saturn_swap CLOB — Contract Integration Spec",
+  "description": "Neutral on-chain integration spec for the SaturnSwap central-limit-order-book validator. Aggregators read resting order UTxOs and build taker fills directly on-chain; no SaturnSwap API and no Dexter/AMM-pool abstraction. Field names are SaturnSwap's own. All amounts are base units.",
+  "version": "1.0.0",
+  "verifiedAt": "2026-06-24",
+  "verifiedAgainst": ["mainnet (Koios, read-only): addresses, baked parameters, fee_percent, wire formats, script_data_hash recipe", "the saturn_swap validator's on-chain behavior", "on-chain reference filler txs (mainnet + preprod)"],
+  "provenance": {
+    "onChainProven": ["1% reference script decoded from Koios: addresses + baked Address parameters (fee_address, authorize_address)", "fee_percent = 100 baked into the 1% validator", "SwapDatum / SwapRedeemer / PaymentDatum wire formats", "Conway script_data_hash recipe", "the non-auth sell-asset fee taker-fill path"],
+    "onChainProvenNonAuthFill": "The non-auth (sell-asset fee) aggregator taker-fill path is PROVEN ON-CHAIN: mainnet aea570815f2c3697873f4bef7e8aa8fa130ad4766ed627fd1349f647369e0eab (block 13615420, valid_contract: True, signed with the taker key only — no authorize co-sign — 1% fee in the sell asset to the baked fee_address, the same inline PaymentDatum byte-identical on owner + fee outputs, self-computed script_data_hash accepted); preprod full fill 90ddbf29... + partial/relist fdf5cab3...."
+  },
+  "network": "mainnet",
+  "model": "synchronous-clob-eutxo",
+  "blueprint": {
+    "title": "orion/saturn-swap",
+    "plutusVersion": "v2",
+    "compiler": "Aiken v1.0.26-alpha+075668b",
+    "unappliedTemplateHash": "2c601bb2e97cc9afd50717331f2bad58b5ebe0534e723ad6afa582f7",
+    "appliedParams": ["fee_address", "authorize_address"],
+    "note": "unappliedTemplateHash is the blueprint hash BEFORE applying the two Address params; it is never an on-chain address. fee_percent is compiled in (a constant), not an applied param."
+  },
+  "validators": [
+    {
+      "label": "current",
+      "feePercent": 1,
+      "feePercentX100": 100,
+      "scriptHash": "73990b71041ceade6f867617f6ce9f187ab710ea2bf1ff8db7d0292f",
+      "scriptAddress": "addr1z9eejzm3qsww4hn0semp0akwnuv84dcsag4lrludklgzjt675jq4yvpskgayj55xegdp30g5rfynax66r8vgn9fldndsrfnae7",
+      "stakeCredential": "5ea481523030b23a495286ca1a18bd141a493e9b5a19d889953f6cdb",
+      "addressHeaderByte": "0x11",
+      "refScriptUtxo": "0e16cd00b2cde4d9aad3ee30ce05a09d39009bd40e83aa477eee71870a97e8d9#0",
+      "refScriptSizeBytes": 5003,
+      "plutusVersion": "v2",
+      "status": "active"
+    }
+  ],
+  "outOfScope": {
+    "legacy4pctRunoff": {
+      "scriptHash": "1af84a9e697e1e7b042a0a06f061e88182feb9e9ada950b36a916bd5",
+      "scriptAddress": "addr1zyd0sj57d9lpu7cy9g9qdurpazqc9l4eaxk6j59nd2gkh4275jq4yvpskgayj55xegdp30g5rfynax66r8vgn9fldndsqzf5tn",
+      "refScriptUtxo": "86cdaeed2afa48821a229f09582ddc8a350fcea2f770875cd5ea92b230b7a0a8#0",
+      "bakedFeePercent": 4,
+      "rule": "OUT OF SCOPE. Orders from before the 1% cutover may still rest here. This validator bakes fee_percent=400; a fill built with the 1% recipe underpays the fee 4x -> is_fee_paid_to_address is false -> the validator DENIES the tx. MUST filter discovery to the 1% address only and MUST NOT fill these orders."
+    }
+  },
+  "resolution": {
+    "rule": "1%-only. Confirm the order UTxO's payment credential (script hash) is 73990b71041ceade6f867617f6ce9f187ab710ea2bf1ff8db7d0292f; skip anything else (e.g. the legacy 4% hash 1af84a9e... -> see outOfScope).",
+    "map": {
+      "73990b71041ceade6f867617f6ce9f187ab710ea2bf1ff8db7d0292f": "0e16cd00b2cde4d9aad3ee30ce05a09d39009bd40e83aa477eee71870a97e8d9#0"
+    }
+  },
+  "discovery": {
+    "byScriptAddress": true,
+    "scopeFilter": "1% address only (payment credential 73990b71...). Skip/do-not-fill any order at the legacy 4% address (see outOfScope).",
+    "inlineDatum": true,
+    "restingOrderHasReferenceScript": false,
+    "decodeDatum": "SwapDatum",
+    "sources": ["Koios POST /address_utxos (_extended)", "Kupo by-address", "Blockfrost /addresses/{addr}/utxos", "Ogmios/chain-follower"]
+  },
+  "datum": {
+    "name": "SwapDatum",
+    "constrAlternative": 0,
+    "cborTag": 121,
+    "inline": true,
+    "wireArrayForm": "indefinite",
+    "wireNote": "SaturnSwap emits indefinite-length arrays (0x9f..0xff). Definite arrays decode to the same Plutus Data and are accepted; reproduce indefinite for byte-identical output.",
+    "fields": [
+      {"index": 0, "name": "owner", "type": "Address", "encoding": "Constr0[payment_credential, stake_credential]; payment = VerificationKeyCredential(Constr0[bstr28]) or ScriptCredential(Constr1[bstr28]); stake = Some(Inline(cred))=Constr0[Constr0[Constr0[bstr28]]] or None=Constr1[]. All hashes 28 bytes. Copy verbatim when building owner output."},
+      {"index": 1, "name": "policy_id_sell", "type": "PolicyId(bytes)", "encoding": "bstr; ADA = empty h'' (0x40)"},
+      {"index": 2, "name": "asset_name_sell", "type": "AssetName(bytes)", "encoding": "bstr; ADA = empty h'' (0x40)"},
+      {"index": 3, "name": "amount_sell", "type": "Int", "units": "base", "encoding": "uint"},
+      {"index": 4, "name": "policy_id_buy", "type": "PolicyId(bytes)", "encoding": "bstr"},
+      {"index": 5, "name": "asset_name_buy", "type": "AssetName(bytes)", "encoding": "bstr"},
+      {"index": 6, "name": "amount_buy", "type": "Int", "units": "base", "encoding": "uint"},
+      {"index": 7, "name": "valid_before_time", "type": "Option<Int>", "encoding": "Some(posix_ms)=Constr0[uint] / None=Constr1[]", "note": "POSIX milliseconds"},
+      {"index": 8, "name": "output_reference", "type": "OutputReference", "encoding": "Constr0[Constr0[bstr32(tx_id)], uint(ix)]", "note": "relist-chain link; fresh orders carry sentinel tx_id=0x00 (single byte), ix=0. NOT the PaymentDatum tag for a normal fill."}
+    ],
+    "example": {
+      "utxo": "a28c54cc8a18823df9254f75038a8b72b82fec655a73288c7868714b4d27c814#0",
+      "cborHex": "d8799fd8799fd8799f581c5fce592147c520b69d3a485b15447cb24fd59cba6d78f143616effc4ffd8799fd8799fd8799f581c96a62ca41357a962e53c93308fe761a4b244f4cf065ada8f912cc305ffffffff40401a017d7840581c7ff33a5565393dc47b48ac47becc12d92c9952e724e8446dfb6adc6646634d415452411b0000001d2207fb3fd87a9fffd8799fd8799f4100ff00ffff",
+      "decoded": {
+        "owner_payment_vk": "5fce592147c520b69d3a485b15447cb24fd59cba6d78f143616effc4",
+        "owner_stake_vk": "96a62ca41357a962e53c93308fe761a4b244f4cf065ada8f912cc305",
+        "policy_id_sell": "", "asset_name_sell": "", "amount_sell": 25000000,
+        "policy_id_buy": "7ff33a5565393dc47b48ac47becc12d92c9952e724e8446dfb6adc66",
+        "asset_name_buy": "634d41545241", "amount_buy": 125124999999,
+        "valid_before_time": null,
+        "output_reference": {"tx_id": "00", "index": 0, "sentinel": true}
+      }
+    }
+  },
+  "redeemer": {
+    "name": "SwapRedeemer",
+    "variants": {
+      "SwapAction": {
+        "constrAlternative": 0,
+        "cborTag": 121,
+        "fields": [
+          {"index": 0, "name": "user_sell_amount", "type": "Int", "units": "base", "desc": "quantity of the order's BUY asset the taker delivers this fill; <= amount_buy; == amount_buy for full fill; < triggers relist split"},
+          {"index": 1, "name": "input_index", "type": "Int", "desc": "index of this order's input among the SPENDING inputs only (tx.inputs), after canonical sort (tx_id asc, then ix asc). Reference inputs (incl. the ref-script UTxO) and collateral are separate context fields and do NOT count toward this index."},
+          {"index": 2, "name": "output_index", "type": "Int", "desc": "position of the owner-payment output (tagged with PaymentDatum) in tx.outputs. OUTPUTS ARE NOT LEDGER-SORTED — they keep author order, so this is simply where you place that output in the list you build."}
+        ],
+        "exampleCborHex": "d8799f1b0000001d2207fb3f0200ff"
+      },
+      "CancelAction": {
+        "constrAlternative": 1,
+        "cborTag": 122,
+        "fields": [
+          {"index": 0, "name": "input_index", "type": "Int", "desc": "index of the order's input among the SPENDING inputs only (tx.inputs), canonical sort (tx_id then ix); reference inputs and collateral excluded — same scoping as SwapAction.input_index"}
+        ],
+        "exampleCborHex": "d87a9f00ff"
+      }
+    }
+  },
+  "paymentDatum": {
+    "name": "PaymentDatum",
+    "constrAlternative": 0,
+    "cborTag": 121,
+    "fields": [
+      {"index": 0, "name": "output_reference", "type": "OutputReference"}
+    ],
+    "usage": "Inline datum on BOTH the owner-payment output AND the fee output. Defends against double satisfaction.",
+    "critical": "output_reference = the SPENT ORDER's OWN input ref (tx_id#ix being spent), NOT SwapDatum.output_reference. The validator binds it from own_input.",
+    "exampleCborHex": "d8799fd8799fd8799f5820a28c54cc8a18823df9254f75038a8b72b82fec655a73288c7868714b4d27c814ff00ffff"
+  },
+  "fee": {
+    "percent": 1,
+    "percentX100": 100,
+    "formula": "total_fee = new_swap_amount_sell * 100 / 10000 (integer division, rounds DOWN)",
+    "feePercentNote": "fee_percent=100 is compiled into the 1% validator. Legacy 4% orders (out of scope) bake fee_percent=400 and must NOT be filled with this recipe.",
+    "newSwapAmountSell": "get_ratio_amount(amount_buy, user_sell_amount, amount_sell) (rounds UP)",
+    "asset": "sell",
+    "assetDetail": "paid in (policy_id_sell, asset_name_sell); lovelace if sell asset is ADA, otherwise that token",
+    "minUtxo": "The fee output is a real UTxO and must satisfy min-UTxO (its inline PaymentDatum counts in the size). ADA-sell: output lovelace = max(total_fee, min_utxo) (~1.2 ADA at current params; top up small fees from taker funds or the ledger rejects with OutputTooSmallUTxO). Token-sell: total_fee tokens + min_utxo ADA. min_utxo = max(requested, ledger min-UTxO); compute the ledger min-UTxO from the live utxoCostPerByte.",
+    "paidTo": "addr1q8x4rlqhrq4rhqhnkamw3fdqmzqgum79yragg4gptcjpphmrc2rpt0exfch4s47fu32amr45vh9wg053hmcx9k7kkcrq6kxftd",
+    "paidToPaymentVk": "cd51fc17182a3b82f3b776e8a5a0d8808e6fc520fa8455015e2410df",
+    "paidToStakeVk": "63c28615bf264e2f5857c9e455dd8eb465cae43e91bef062dbd6b606",
+    "feeOutputDatum": "PaymentDatum{spent order ref} (same as owner output)",
+    "waivedIfAuthCosigned": true,
+    "authorizeAddress": "addr1q97zx2xmz2v8zjww3ldm42fjcy259cjdd0fdfpm2hla93wyps0cjn6l2djsqly2hyea4xp6ta9q0rkk45n5dt7xg2aqsjnteg8",
+    "authorizePaymentVk": "7c2328db12987149ce8fdbbaa932c11542e24d6bd2d4876abffa58b8",
+    "aggregatorPath": "fees_paid (non-auth): aggregators do NOT hold the authorize key, so they ALWAYS pay the 1% fee in the sell asset"
+  },
+  "ratio": {
+    "scale": 1000000000000,
+    "scaleExp": "1e12",
+    "rounding": "up",
+    "calculateRatio": "(divisor*scale + dividend - 1) / dividend",
+    "calculateFromRatio": "(amount*ratio + scale - 1) / scale",
+    "getRatioAmount": "calculate_from_ratio(old_amount, calculate_ratio(new_token, old_token, scale), scale)"
+  },
+  "units": {
+    "allAmountsAreBaseUnits": true,
+    "decimalsEncodedOnChain": false,
+    "footgun": "#1 integration failure mode. amount_sell, amount_buy, and every value quantity are RAW base-unit integers. Decimals are NOT on chain. Do NOT assume decimals (not 6, not 0).",
+    "decimalsLookup": "per-asset, out-of-band: Cardano Token Registry / Koios POST /asset_info -> token_registry_metadata.decimals; ADA = 6",
+    "buildInBaseUnits": "Do all ratio/fee/min-utxo arithmetic in base units; divide by decimals only for display/pricing",
+    "priceFormula": "(amount_sell/10^dec_sell) / (amount_buy/10^dec_buy)",
+    "example": {"asset": "cMATRA", "policyId": "7ff33a5565393dc47b48ac47becc12d92c9952e724e8446dfb6adc66", "assetNameHex": "634d41545241", "decimals": 6}
+  },
+  "scriptDataHash": {
+    "requiredForStandardBuilders": false,
+    "standardBuilderNote": "cardano-cli, lucid-evolution, Mesh, cardano-serialization-lib compute body key 11 automatically. The validator imposes no custom integrity-hash requirement.",
+    "handRolledRecipe": {
+      "algo": "blake2b-256",
+      "components": ["cbor(redeemers)", "cbor(datums)", "cbor(language_views)"],
+      "concatenation": "blake2b256( cbor(redeemers) || cbor(datums) || cbor(language_views) )",
+      "languageViews": {"key": 1, "value": "PlutusV2 cost-model integer array"},
+      "costModelForm": "bare-array",
+      "costModelNotTag24Wrapped": true,
+      "datumsOmittedForInline": true,
+      "redeemersKey": 5,
+      "datumsKey": 4,
+      "source": "the live Conway script_data_hash recipe the ledger accepts (proven on-chain; see provenance.onChainProvenNonAuthFill)",
+      "legacyPathToAvoid": "a variant that tag24-wraps the cost model + uses an empty 0x80 datums array is rejected by the ledger (PPViewHashesDontMatch); do not use it.",
+      "provenance": "Both this script_data_hash recipe AND the takerFill sell-asset fee-output construction are on-chain-proven — see top-level provenance.onChainProvenNonAuthFill."
+    }
+  },
+  "relist": {
+    "maxSplitsPerTx": 1,
+    "doubleSatDefence": "validator fails on zero or multiple continuation matches",
+    "trigger": "user_sell_amount < amount_buy",
+    "continuationMatch": "by payment-credential equality (same script) AND continuation SwapDatum.output_reference == spent order's own input ref",
+    "continuationDatum": {
+      "unchanged": ["owner", "policy_id_sell", "asset_name_sell", "policy_id_buy", "asset_name_buy", "valid_before_time"],
+      "output_reference": "= spent order's own input ref (relist-chain link)",
+      "next_amount_buy_range": "[corrected_new_amount_buy, amount_buy - user_sell_amount]",
+      "next_amount_sell_range": "[corrected_new_amount_sell, new_amount_sell]"
+    },
+    "continuationValue": "EXACTLY two value entries: ADA + the sell asset ONLY (value_has_asset_and_lovelace requires exactly two policy entries; any third asset denies). Holds >= corrected_new_amount_sell of the sell asset. For a NON-ADA-sell order the continuation lovelace must be >= the spent script UTxO's lovelace (min_utxo_goes_back_to_script -> owner_paid_enough_ada_with_min_utxo(swap_value, script_value, 0)): preserve the original bundled ADA, do NOT attach a smaller freshly-computed min-UTxO. ADA-sell uses the 2-ADA buffer logic in adaSellBuffer.",
+    "math": {
+      "remaining_buy": "amount_buy - user_sell_amount",
+      "new_amount_sell": "get_ratio_amount(amount_buy, remaining_buy, amount_sell)"
+    },
+    "adaSellBuffer": {
+      "appliesWhen": "sell asset is ADA AND new_amount_sell > 2000000",
+      "bufferLovelace": 2000000,
+      "corrected_new_amount_sell": "new_amount_sell - 2000000",
+      "corrected_new_amount_buy": "get_ratio_amount(amount_sell, corrected_new_amount_sell, amount_buy)",
+      "bufferPaidTo": "owner (owner_lovelace >= buffer)"
+    }
+  },
+  "cancel": {
+    "redeemer": "CancelAction(input_index)",
+    "signedByOwner": "key-hash owner -> key hash in tx.extra_signatories; script owner -> an input from the same script credential",
+    "scriptOwnerReturn": "if owner is a script, value must return to owner with PaymentDatum{spent order ref} and equal the spent UTxO value"
+  },
+  "takerFill": {
+    "ownerOutput": {
+      "to": "owner Address from datum (copy verbatim)",
+      "contains": ">= user_sell_amount of (policy_id_buy, asset_name_buy)",
+      "minAda": "supplied by taker; for a full-fill non-ADA-sell order also satisfy owner_paid_enough_ada_with_min_utxo: lovelace(owner) >= amount_buy + lovelace(script_utxo). NOTE: amount_buy is added as RAW lovelace regardless of the buy asset, so a token->token FULL fill is generally infeasible (would need amount_buy-as-lovelace of ADA) and must be done as a partial fill (case a). The literal formula governs.",
+      "inlineDatum": "PaymentDatum{spent order ref}",
+      "assetNameConstraint": "exactly one asset name under policy_id_buy in the owner output; must equal asset_name_buy"
+    },
+    "feeOutput": {
+      "to": "fee_address",
+      "contains": ">= total_fee of (policy_id_sell, asset_name_sell), where total_fee = new_swap_amount_sell * 100 / 10000 (1%)",
+      "minUtxo": "floor to min-UTxO: ADA-sell output = max(total_fee, min_utxo); token-sell output = total_fee tokens + min_utxo ADA (see fee.minUtxo)",
+      "inlineDatum": "PaymentDatum{spent order ref} (same as owner output)"
+    },
+    "spendOrder": "via reference script (reference input = refScriptUtxo for that order); present inline datum. cardano-cli: --spending-tx-in-reference <refUtxo> POINTS AT the ref-script UTxO, with qualifiers --spending-plutus-script-v2, --spending-reference-tx-in-inline-datum-present, --spending-reference-tx-in-redeemer-file, --spending-reference-tx-in-execution-units (the --spending-reference-tx-in-* family are the qualifiers, NOT the ref-UTxO pointer).",
+    "validity": "if valid_before_time = Some(t): tx validity_range entirely before t (is_entirely_before). invalid_hereafter <= t is admissible ONLY because Conway's invalid_hereafter is an EXCLUSIVE upper bound; set strictly < t if your library emits an inclusive bound.",
+    "indices": "input_index = index over the canonically sorted SPENDING inputs only (tx.inputs; reference inputs and collateral excluded). output_index = the position of the owner-payment output in tx.outputs in AUTHOR ORDER — outputs are NOT ledger-sorted.",
+    "batching": "DexHunter's PRIMARY path. Filling MULTIPLE orders in one tx: one owner output AND one fee output PER order, each tagged with inline PaymentDatum{that order's own tx_id#ix}. NEVER coalesce fee outputs — value_paid_to_with_datum requires EXACTLY ONE output matching {address, PaymentDatum} (zero or >1 -> deny), so a merged fee output satisfies at most one order and the rest deny. Each spent order gets its own SwapAction redeemer with its own input_index/output_index. Every order in the batch is a 1% order spending against the single ref-script UTxO 0e16cd00...#0; never include a legacy 4% order (out of scope) or the whole tx denies.",
+    "noApiNoAuthKey": true
+  },
+  "sources": {
+    "onChain": "the saturn_swap validator's on-chain behavior (1% deployment 73990b71...), verified against real on-chain order datums + redeemers",
+    "proofs": "the reference filler's on-chain taker-fill txs (mainnet aea570815f...; preprod 90ddbf29..., fdf5cab3...)"
+  },
+  "openItems": [
+    "Min-UTxO ADA on owner/relist outputs depends on live utxoCostPerByte; compute from current protocol params, do not hard-code.",
+    "valid_before_time is POSIX milliseconds; confirm builder slot<->POSIX conversion against current era SystemStart/slot-length when setting expiry-bounded fills."
+  ]
+}

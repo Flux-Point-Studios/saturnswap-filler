@@ -1,0 +1,47 @@
+{
+  "swapActions": [
+    {
+      "tx": "c2366a8de723115cfbf585a8e9d45b0ecd27dffa6d13d305f464a3dbab795e29",
+      "idx": 3,
+      "fields": [
+        4000000,
+        3,
+        0
+      ]
+    },
+    {
+      "tx": "f081f362faccd491161acb5c428eb609fc8f41a9d15281eada52d3443ae09e87",
+      "idx": 0,
+      "fields": [
+        12500000,
+        0,
+        0
+      ]
+    },
+    {
+      "tx": "b2b2984e9b3cc23f9db5125acbe533e60860e3d1808927685295f3adc83bd9c5",
+      "idx": 1,
+      "fields": [
+        5000000,
+        1,
+        0
+      ]
+    }
+  ],
+  "cancelActions": [
+    {
+      "tx": "002d6c7958170d073124d724cc4cd67d3b4f1d759f6b499b0562a99715d395b5",
+      "idx": 1,
+      "fields": [
+        1
+      ]
+    },
+    {
+      "tx": "169db8b4c3633583f9f706e16d75a4dc047183451f4a053386854fe94244b08b",
+      "idx": 1,
+      "fields": [
+        1
+      ]
+    }
+  ]
+}
