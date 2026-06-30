@@ -1,5 +1,6 @@
-// saturnswap-filler — standalone, optional reference filler for aggregators (1%-only).
-// Discover SaturnSwap CLOB orders on-chain and build a non-auth (1% fee) taker fill.
+// saturnswap-filler — standalone, optional reference filler for aggregators.
+// Discover SaturnSwap CLOB orders on-chain (1% + optional 4% run-off) and build a non-auth
+// taker fill, paying the fee at the order's own deployment rate (1% or 4%) in the sell asset.
 // No SaturnSwap API. No SaturnSwapBackend / SaturnSwapWeb dependency, either direction.
 
 export * from "./contract.js";

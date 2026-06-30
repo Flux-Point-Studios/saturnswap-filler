@@ -1,10 +1,15 @@
-// SaturnSwap saturn_swap deployment registry (mainnet). 1%-ONLY by design.
-// The legacy 4% run-off deployment (hash 1af84a9e…, ref 86cdaeed…#0) is OUT OF SCOPE:
-// those orders are NOT discovered and MUST NOT be filled by this lib. Resolution is
-// PER ORDER, keyed by the order's own script address / payment credential — but only
-// the single 1% deployment is registered, so any non-1% order fails to resolve.
+// SaturnSwap saturn_swap deployment registry (mainnet). TWO in-scope deployments that
+// share the SAME baked fee_address + authorize credential and differ ONLY in fee_percent:
+//   - current 1% (hash 73990b71…, ref 0e16cd00…#0, fee_percent_x100 = 100)
+//   - legacy 4% run-off (hash 1af84a9e…, ref 86cdaeed…#0, fee_percent_x100 = 400)
+// Orders may rest at EITHER address. Resolution is PER ORDER, keyed by the order's own
+// script address / payment credential: the resolved deployment supplies the fee_percent
+// AND the reference-script UTxO to spend against. A 4% order MUST be filled with
+// fee_percent = 400 (the 1% recipe underpays 4x and the validator denies); a 1% order
+// MUST be filled with fee_percent = 100. Mixing both in one tx is fine as long as each
+// order's fee output uses its OWN fee_percent + its OWN per-order PaymentDatum.
 
-export type Version = "1pct";
+export type Version = "1pct" | "4pct";
 
 export interface Deployment {
   version: Version;
@@ -18,25 +23,25 @@ export interface Deployment {
   feePercentX100: number;
 }
 
-// fee_address baked into the validator (the 1% fee output goes here).
+// fee_address baked into BOTH validators (the fee output goes here for either version).
 //   payment VK cred cd51fc17..., stake key 63c28615...
 export const FEE_ADDRESS =
   "addr1q8x4rlqhrq4rhqhnkamw3fdqmzqgum79yragg4gptcjpphmrc2rpt0exfch4s47fu32amr45vh9wg053hmcx9k7kkcrq6kxftd";
 export const FEE_PAYMENT_CRED = "cd51fc17182a3b82f3b776e8a5a0d8808e6fc520fa8455015e2410df";
 export const FEE_STAKE_CRED = "63c28615bf264e2f5857c9e455dd8eb465cae43e91bef062dbd6b606";
 
-// authorize_address — a credential baked into the validator (readable on-chain).
-// Aggregators NEVER hold this key, so the non-auth path (this lib) pays the 1% fee in
-// the sell asset to fee_address instead.
+// authorize_address — a credential baked into the validator (readable on-chain), identical
+// for both deployments. Aggregators NEVER hold this key, so the non-auth path (this lib)
+// pays the fee in the sell asset to fee_address instead.
 export const AUTHORIZE_PAYMENT_CRED = "7c2328db12987149ce8fdbbaa932c11542e24d6bd2d4876abffa58b8";
 
 // Ratio scale (the validator's ratio helpers) — all roundings are UP.
 export const RATIO_SCALE = 1_000_000_000_000n;
 
-// Single supported deployment: the current 1% saturn_swap. fee_percent is compiled in
-// as a constant (100 => 1%; calculate_fee divides by 10000), so total_fee is always
-// new_swap_amount_sell * 100 / 10000.
-export const FEE_PERCENT_X100 = 100;
+// fee_percent is compiled into each validator as a constant (calculate_fee divides by 10000),
+// so total_fee = new_swap_amount_sell * fee_percent_x100 / 10000 with the PER-DEPLOYMENT rate.
+export const FEE_PERCENT_X100 = 100; // current 1%
+export const LEGACY_FEE_PERCENT_X100 = 400; // legacy 4% run-off
 
 export const DEPLOYMENTS: Deployment[] = [
   {
@@ -46,6 +51,14 @@ export const DEPLOYMENTS: Deployment[] = [
       "addr1z9eejzm3qsww4hn0semp0akwnuv84dcsag4lrludklgzjt675jq4yvpskgayj55xegdp30g5rfynax66r8vgn9fldndsrfnae7",
     refScript: { txHash: "0e16cd00b2cde4d9aad3ee30ce05a09d39009bd40e83aa477eee71870a97e8d9", outputIndex: 0 },
     feePercentX100: FEE_PERCENT_X100,
+  },
+  {
+    version: "4pct",
+    scriptHash: "1af84a9e697e1e7b042a0a06f061e88182feb9e9ada950b36a916bd5",
+    orderAddress:
+      "addr1zyd0sj57d9lpu7cy9g9qdurpazqc9l4eaxk6j59nd2gkh4275jq4yvpskgayj55xegdp30g5rfynax66r8vgn9fldndsqzf5tn",
+    refScript: { txHash: "86cdaeed2afa48821a229f09582ddc8a350fcea2f770875cd5ea92b230b7a0a8", outputIndex: 0 },
+    feePercentX100: LEGACY_FEE_PERCENT_X100,
   },
 ];
 

@@ -1,7 +1,7 @@
 {
   "name": "saturnswap-filler",
   "version": "0.1.0",
-  "description": "Standalone, optional reference filler library for discovering SaturnSwap CLOB orders on-chain and building non-auth (1% fee) taker-fill transactions. No SaturnSwap API. No SaturnSwapBackend/SaturnSwapWeb dependency.",
+  "description": "Standalone, optional reference filler library for discovering SaturnSwap CLOB orders on-chain (1% + optional 4% run-off) and building non-auth taker-fill transactions with the fee resolved per order. No SaturnSwap API. No SaturnSwapBackend/SaturnSwapWeb dependency.",
   "type": "module",
   "license": "MIT",
   "author": "Flux Point Studios",

@@ -1,13 +1,14 @@
 {
   "name": "saturn_swap",
   "title": "SaturnSwap saturn_swap CLOB — Contract Integration Spec",
-  "description": "Neutral on-chain integration spec for the SaturnSwap central-limit-order-book validator. Aggregators read resting order UTxOs and build taker fills directly on-chain; no SaturnSwap API and no Dexter/AMM-pool abstraction. Field names are SaturnSwap's own. All amounts are base units.",
-  "version": "1.0.0",
-  "verifiedAt": "2026-06-24",
-  "verifiedAgainst": ["mainnet (Koios, read-only): addresses, baked parameters, fee_percent, wire formats, script_data_hash recipe", "the saturn_swap validator's on-chain behavior", "on-chain reference filler txs (mainnet + preprod)"],
+  "description": "Neutral on-chain integration spec for the SaturnSwap central-limit-order-book validator. Two in-scope deployments: the current 1% validator and the optional legacy 4% run-off validator (same baked fee_address + authorize credential; only fee_percent + ref script differ). Aggregators read resting order UTxOs and build taker fills directly on-chain; no SaturnSwap API and no Dexter/AMM-pool abstraction. Field names are SaturnSwap's own. All amounts are base units.",
+  "version": "1.1.0",
+  "verifiedAt": "2026-06-30",
+  "verifiedAgainst": ["mainnet (Koios, read-only): 1% + 4% addresses, baked parameters, fee_percent (100 and 400), wire formats, script_data_hash recipe", "the saturn_swap validator's on-chain behavior (both deployments)", "on-chain reference filler txs (mainnet 1% + preprod 1% and 4%)"],
   "provenance": {
-    "onChainProven": ["1% reference script decoded from Koios: addresses + baked Address parameters (fee_address, authorize_address)", "fee_percent = 100 baked into the 1% validator", "SwapDatum / SwapRedeemer / PaymentDatum wire formats", "Conway script_data_hash recipe", "the non-auth sell-asset fee taker-fill path"],
-    "onChainProvenNonAuthFill": "The non-auth (sell-asset fee) aggregator taker-fill path is PROVEN ON-CHAIN: mainnet aea570815f2c3697873f4bef7e8aa8fa130ad4766ed627fd1349f647369e0eab (block 13615420, valid_contract: True, signed with the taker key only — no authorize co-sign — 1% fee in the sell asset to the baked fee_address, the same inline PaymentDatum byte-identical on owner + fee outputs, self-computed script_data_hash accepted); preprod full fill 90ddbf29... + partial/relist fdf5cab3...."
+    "onChainProven": ["1% reference script decoded from Koios: addresses + baked Address parameters (fee_address, authorize_address)", "fee_percent = 100 baked into the 1% validator, fee_percent = 400 baked into the 4% run-off validator (shared fee_address + authorize credential)", "SwapDatum / SwapRedeemer / PaymentDatum wire formats", "Conway script_data_hash recipe", "the non-auth sell-asset fee taker-fill path at BOTH rates"],
+    "onChainProvenNonAuthFill": "The non-auth (sell-asset fee) aggregator taker-fill path is PROVEN ON-CHAIN: mainnet aea570815f2c3697873f4bef7e8aa8fa130ad4766ed627fd1349f647369e0eab (block 13615420, valid_contract: True, signed with the taker key only — no authorize co-sign — 1% fee in the sell asset to the baked fee_address, the same inline PaymentDatum byte-identical on owner + fee outputs, self-computed script_data_hash accepted); preprod full fill 90ddbf29... + partial/relist fdf5cab3....",
+    "onChainProvenNonAuthFill4pct": "The 4% non-auth fee branch (legacy validator 1af84a9e...) was likewise proven on-chain: a non-auth fill against a 4% order (the FRENCHIE order, preprod) with the fee output at the 4% rate (feePercentX100=400) to the shared fee_address. The construction is identical to the 1% path except the compiled fee_percent constant; only the fee amount and the ref script differ."
   },
   "network": "mainnet",
   "model": "synchronous-clob-eutxo",
@@ -32,26 +33,39 @@
       "refScriptSizeBytes": 5003,
       "plutusVersion": "v2",
       "status": "active"
-    }
-  ],
-  "outOfScope": {
-    "legacy4pctRunoff": {
+    },
+    {
+      "label": "legacy-runoff",
+      "feePercent": 4,
+      "feePercentX100": 400,
       "scriptHash": "1af84a9e697e1e7b042a0a06f061e88182feb9e9ada950b36a916bd5",
       "scriptAddress": "addr1zyd0sj57d9lpu7cy9g9qdurpazqc9l4eaxk6j59nd2gkh4275jq4yvpskgayj55xegdp30g5rfynax66r8vgn9fldndsqzf5tn",
+      "addressHeaderByte": "0x11",
       "refScriptUtxo": "86cdaeed2afa48821a229f09582ddc8a350fcea2f770875cd5ea92b230b7a0a8#0",
-      "bakedFeePercent": 4,
-      "rule": "OUT OF SCOPE. Orders from before the 1% cutover may still rest here. This validator bakes fee_percent=400; a fill built with the 1% recipe underpays the fee 4x -> is_fee_paid_to_address is false -> the validator DENIES the tx. MUST filter discovery to the 1% address only and MUST NOT fill these orders."
+      "plutusVersion": "v2",
+      "status": "active",
+      "note": "OPTIONAL, in scope. Legacy 4% run-off book: orders from before the 1% cutover may still rest here and are fillable for extra depth. This validator bakes fee_percent=400, so its fee output MUST use feePercentX100=400 (the 1% recipe underpays 4x -> is_fee_paid_to_address false -> DENY). Same baked fee_address + authorize credential as the 1% deployment; only fee_percent and the ref script differ."
     }
+  ],
+  "optional4pctRunoff": {
+    "inScope": true,
+    "scriptHash": "1af84a9e697e1e7b042a0a06f061e88182feb9e9ada950b36a916bd5",
+    "scriptAddress": "addr1zyd0sj57d9lpu7cy9g9qdurpazqc9l4eaxk6j59nd2gkh4275jq4yvpskgayj55xegdp30g5rfynax66r8vgn9fldndsqzf5tn",
+    "refScriptUtxo": "86cdaeed2afa48821a229f09582ddc8a350fcea2f770875cd5ea92b230b7a0a8#0",
+    "bakedFeePercent": 4,
+    "feePercentX100": 400,
+    "rule": "OPTIONAL but IN SCOPE. Aggregators MAY fill these orders for extra depth. You MUST build the fee output at feePercentX100=400; a 1%-rate fee output underpays 4x and the validator DENIES the tx. The fee_address is identical to the 1% deployment's. Mixing 1% and 4% orders in one tx is allowed as long as each order's fee output uses its own fee_percent and its own per-order PaymentDatum (the shared fee_address does NOT coalesce them)."
   },
   "resolution": {
-    "rule": "1%-only. Confirm the order UTxO's payment credential (script hash) is 73990b71041ceade6f867617f6ce9f187ab710ea2bf1ff8db7d0292f; skip anything else (e.g. the legacy 4% hash 1af84a9e... -> see outOfScope).",
+    "rule": "Two in-scope deployments. Read the order UTxO's payment credential (script hash) and resolve fee_percent + ref script PER ORDER: 73990b71... -> 1% (feePercentX100=100, ref 0e16cd00...#0); 1af84a9e... -> 4% (feePercentX100=400, ref 86cdaeed...#0). Skip anything that resolves to neither. The fee_address is the same for both. Use the resolved order's own rate for its fee output and its own ref script to spend it.",
     "map": {
-      "73990b71041ceade6f867617f6ce9f187ab710ea2bf1ff8db7d0292f": "0e16cd00b2cde4d9aad3ee30ce05a09d39009bd40e83aa477eee71870a97e8d9#0"
+      "73990b71041ceade6f867617f6ce9f187ab710ea2bf1ff8db7d0292f": {"refScriptUtxo": "0e16cd00b2cde4d9aad3ee30ce05a09d39009bd40e83aa477eee71870a97e8d9#0", "feePercentX100": 100},
+      "1af84a9e697e1e7b042a0a06f061e88182feb9e9ada950b36a916bd5": {"refScriptUtxo": "86cdaeed2afa48821a229f09582ddc8a350fcea2f770875cd5ea92b230b7a0a8#0", "feePercentX100": 400}
     }
   },
   "discovery": {
     "byScriptAddress": true,
-    "scopeFilter": "1% address only (payment credential 73990b71...). Skip/do-not-fill any order at the legacy 4% address (see outOfScope).",
+    "scopeFilter": "Scan the 1% address (payment credential 73990b71...) and, optionally for extra depth, the 4% run-off address (1af84a9e...). Tag each order with its resolved feePercentX100 + ref script. Skip any order whose payment credential is neither hash. If you fill a 4% order you MUST use its 4% rate.",
     "inlineDatum": true,
     "restingOrderHasReferenceScript": false,
     "decodeDatum": "SwapDatum",
@@ -124,10 +138,13 @@
     "exampleCborHex": "d8799fd8799fd8799f5820a28c54cc8a18823df9254f75038a8b72b82fec655a73288c7868714b4d27c814ff00ffff"
   },
   "fee": {
-    "percent": 1,
-    "percentX100": 100,
-    "formula": "total_fee = new_swap_amount_sell * 100 / 10000 (integer division, rounds DOWN)",
-    "feePercentNote": "fee_percent=100 is compiled into the 1% validator. Legacy 4% orders (out of scope) bake fee_percent=400 and must NOT be filled with this recipe.",
+    "perDeployment": true,
+    "rates": {
+      "73990b71041ceade6f867617f6ce9f187ab710ea2bf1ff8db7d0292f": {"percent": 1, "percentX100": 100},
+      "1af84a9e697e1e7b042a0a06f061e88182feb9e9ada950b36a916bd5": {"percent": 4, "percentX100": 400}
+    },
+    "formula": "total_fee = new_swap_amount_sell * fee_percent_x100 / 10000 (integer division, rounds DOWN), where fee_percent_x100 is THIS order's deployment rate (100 for 73990b71..., 400 for 1af84a9e...).",
+    "feePercentNote": "fee_percent is compiled into each validator (100 in the 1% validator, 400 in the 4% run-off validator) and is NOT a datum field or applied parameter. Resolve it per order from the order's own address (see resolution.map); never assume 1%. A 4% order filled at the 1% rate underpays 4x and the validator DENIES.",
     "newSwapAmountSell": "get_ratio_amount(amount_buy, user_sell_amount, amount_sell) (rounds UP)",
     "asset": "sell",
     "assetDetail": "paid in (policy_id_sell, asset_name_sell); lovelace if sell asset is ADA, otherwise that token",
@@ -139,7 +156,7 @@
     "waivedIfAuthCosigned": true,
     "authorizeAddress": "addr1q97zx2xmz2v8zjww3ldm42fjcy259cjdd0fdfpm2hla93wyps0cjn6l2djsqly2hyea4xp6ta9q0rkk45n5dt7xg2aqsjnteg8",
     "authorizePaymentVk": "7c2328db12987149ce8fdbbaa932c11542e24d6bd2d4876abffa58b8",
-    "aggregatorPath": "fees_paid (non-auth): aggregators do NOT hold the authorize key, so they ALWAYS pay the 1% fee in the sell asset"
+    "aggregatorPath": "fees_paid (non-auth): aggregators do NOT hold the authorize key (identical across both deployments), so they ALWAYS pay the fee in the sell asset at the order's own deployment rate (1% or 4%)"
   },
   "ratio": {
     "scale": 1000000000000,
@@ -214,15 +231,15 @@
       "assetNameConstraint": "exactly one asset name under policy_id_buy in the owner output; must equal asset_name_buy"
     },
     "feeOutput": {
-      "to": "fee_address",
-      "contains": ">= total_fee of (policy_id_sell, asset_name_sell), where total_fee = new_swap_amount_sell * 100 / 10000 (1%)",
+      "to": "fee_address (same for both deployments)",
+      "contains": ">= total_fee of (policy_id_sell, asset_name_sell), where total_fee = new_swap_amount_sell * fee_percent_x100 / 10000 using THIS order's deployment rate (100 for 73990b71..., 400 for 1af84a9e...). Never assume 1% — a 4% order needs the 400 rate or the validator denies.",
       "minUtxo": "floor to min-UTxO: ADA-sell output = max(total_fee, min_utxo); token-sell output = total_fee tokens + min_utxo ADA (see fee.minUtxo)",
       "inlineDatum": "PaymentDatum{spent order ref} (same as owner output)"
     },
     "spendOrder": "via reference script (reference input = refScriptUtxo for that order); present inline datum. cardano-cli: --spending-tx-in-reference <refUtxo> POINTS AT the ref-script UTxO, with qualifiers --spending-plutus-script-v2, --spending-reference-tx-in-inline-datum-present, --spending-reference-tx-in-redeemer-file, --spending-reference-tx-in-execution-units (the --spending-reference-tx-in-* family are the qualifiers, NOT the ref-UTxO pointer).",
     "validity": "if valid_before_time = Some(t): tx validity_range entirely before t (is_entirely_before). invalid_hereafter <= t is admissible ONLY because Conway's invalid_hereafter is an EXCLUSIVE upper bound; set strictly < t if your library emits an inclusive bound.",
     "indices": "input_index = index over the canonically sorted SPENDING inputs only (tx.inputs; reference inputs and collateral excluded). output_index = the position of the owner-payment output in tx.outputs in AUTHOR ORDER — outputs are NOT ledger-sorted.",
-    "batching": "DexHunter's PRIMARY path. Filling MULTIPLE orders in one tx: one owner output AND one fee output PER order, each tagged with inline PaymentDatum{that order's own tx_id#ix}. NEVER coalesce fee outputs — value_paid_to_with_datum requires EXACTLY ONE output matching {address, PaymentDatum} (zero or >1 -> deny), so a merged fee output satisfies at most one order and the rest deny. Each spent order gets its own SwapAction redeemer with its own input_index/output_index. Every order in the batch is a 1% order spending against the single ref-script UTxO 0e16cd00...#0; never include a legacy 4% order (out of scope) or the whole tx denies.",
+    "batching": "DexHunter's PRIMARY path. Filling MULTIPLE orders in one tx: one owner output AND one fee output PER order, each tagged with inline PaymentDatum{that order's own tx_id#ix}. NEVER coalesce fee outputs — value_paid_to_with_datum requires EXACTLY ONE output matching {address, PaymentDatum} (zero or >1 -> deny), so a merged fee output satisfies at most one order and the rest deny. Each spent order gets its own SwapAction redeemer with its own input_index/output_index. A batch MAY mix 1% and 4% orders: resolve each order's deployment, readFrom both ref-script UTxOs (0e16cd00...#0 for 1%, 86cdaeed...#0 for 4%) as needed, and build each order's fee output at ITS OWN fee_percent (100 or 400). The two deployments share the same fee_address, so the per-order distinct PaymentDatum is what keeps the fee outputs from coalescing. Mixing the rate up (a 4% order with a 1%-rate fee output) denies that order and the whole tx.",
     "noApiNoAuthKey": true
   },
   "sources": {
