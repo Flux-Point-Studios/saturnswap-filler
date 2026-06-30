@@ -74,14 +74,17 @@ Primitives (independently testable / reusable)
 |---|---|
 | Discovery (1% + optional 4%) | Implemented (unit-tested on the live 1% book fixture + a 4% order) |
 | Per-order fee resolution (100 / 400) | Implemented (resolved from the order's own script address) |
-| Non-auth taker-fill builder | Implemented; proven on-chain (mainnet 1% `aea570815f…`; preprod 1% `90ddbf29…`; preprod 4% FRENCHIE) |
-| PARTIAL fill + §8 relist split | Implemented; proven on-chain (preprod `fdf5cab3…`) |
+| Non-auth taker-fill builder | Implemented; **proven on-chain** — mainnet 1% + preprod 1% (txs linked below). The 4% branch is build+eval-proven (FRENCHIE), not yet submitted on-chain |
+| PARTIAL fill + §8 relist split | Implemented; **proven on-chain** (preprod, linked below) |
 | Multi-order single-tx batching (may mix 1% + 4%) | Implemented (per-order owner + fee outputs at their own rate, never coalesced) |
 | `CancelAction` builder (owner-only, key-hash owner) | Implemented; script-owner cancels refused |
 | Self-computed Conway SDH | Implemented; equals the builder's SDH and accepted by the ledger |
 | Exact min-UTxO | Implemented — `(size+160)*coinsPerUtxoByte` over the output incl. its inline PaymentDatum |
 
-On-chain proofs: mainnet non-auth 1% fill `aea570815f2c3697873f4bef7e8aa8fa130ad4766ed627fd1349f647369e0eab`
-(`valid_contract: True`, 1% fee in the sell asset to the baked `fee_address`); preprod 1% full fill
-`90ddbf29…` and partial/relist `fdf5cab3…`; preprod 4% non-auth fill (the FRENCHIE order, fee output at
-the 4% rate to the shared `fee_address`).
+### On-chain proofs (non-auth taker fills built by this library)
+
+- **Mainnet — 1% full fill:** [`aea570815f2c3697873f4bef7e8aa8fa130ad4766ed627fd1349f647369e0eab`](https://cexplorer.io/tx/aea570815f2c3697873f4bef7e8aa8fa130ad4766ed627fd1349f647369e0eab) — block 13615420, `valid_contract: True`, 1% fee in the sell asset to the baked `fee_address`, signed with the taker key only (no `authorize` co-sign).
+- **Preprod — 1% full fill:** [`90ddbf29a847a08115ba4608a4fa9e951ef5d97a84f9a30aeaeeb9a3cbc0baad`](https://preprod.cexplorer.io/tx/90ddbf29a847a08115ba4608a4fa9e951ef5d97a84f9a30aeaeeb9a3cbc0baad) — block 4880554.
+- **Preprod — 1% partial fill + §8 relist:** [`fdf5cab313e0242c677d09bf2890ecb4393d365bddf4eebfea21ea1c48e548eb`](https://preprod.cexplorer.io/tx/fdf5cab313e0242c677d09bf2890ecb4393d365bddf4eebfea21ea1c48e548eb) — block 4880596.
+
+The **4% branch** is build- and UPLC-eval-proven (a non-auth fill against the mainnet FRENCHIE 4% order, fee output at the 4% rate to the shared `fee_address`, ex-units mem 331449 / steps 112,716,586) but **not yet submitted on-chain**. Its construction is byte-identical to the proven 1% path except the validator's compiled `fee_percent` constant (400 vs 100).
