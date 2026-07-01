@@ -1,7 +1,7 @@
 # SaturnSwap `saturn_swap` — Contract Integration Spec
 
 **Status:** the addresses, baked parameters, `SwapDatum`/`SwapRedeemer`/`PaymentDatum` wire formats, and the Conway `script_data_hash` recipe are verified against Cardano mainnet (Koios, read-only) and the validator's on-chain behavior. The non-auth (sell-asset fee) aggregator path in §6/§7 is **proven on-chain on MAINNET** (the reference filler's non-auth fill, mainnet tx [`aea570815f2c3697873f4bef7e8aa8fa130ad4766ed627fd1349f647369e0eab`](https://cexplorer.io/tx/aea570815f2c3697873f4bef7e8aa8fa130ad4766ed627fd1349f647369e0eab), `valid_contract: True`; also preprod [`90ddbf29…`](https://preprod.cexplorer.io/tx/90ddbf29a847a08115ba4608a4fa9e951ef5d97a84f9a30aeaeeb9a3cbc0baad) full + [`fdf5cab3…`](https://preprod.cexplorer.io/tx/fdf5cab313e0242c677d09bf2890ecb4393d365bddf4eebfea21ea1c48e548eb) partial). See §7.10.
-A third deployment — **V3 (PlutusV3, preprod)** — adds an optional Aegis-coverage premium, a minimum-partial-fill floor, and self-validating fill receipts. Its datum/redeemer/`script_data_hash` wire formats and the covered-order premium rule are **proven on-chain on PREPROD** (V3 mainnet is pending). The applied build is the **hardened** `ec457591…` (supersedes `06ae8ee4…`): a red-team pass closed a fill-receipt forgery (the receipt now binds to a real `SwapAction` fill with a derived `sold_amount`) and a premium under-collection (the vault-distinctness check is enforced on-chain and the premium is floored at 1). See §12.
+A third deployment — **V3 (PlutusV3)** — adds an optional Aegis-coverage premium, a minimum-partial-fill floor, and self-validating fill receipts. It is **LIVE on mainnet** at `6023f59dce0064f1d6d27594dbea25bc4305a9f6a10f3a064037553a` (order address `addr1z9sz8ava…`, ref `de19f6a9…#0`), baking the **same** production `fee_address` as the V2 deployments; its datum/redeemer/`script_data_hash` wire formats and the covered-order premium rule are **proven on-chain on MAINNET** (§12.8). The covered-order premium binds to a vault **distinct** from owner/fee (floored at 1 unit) and the CIP-69 fill-receipt mint binds to a real `SwapAction` fill with a derived `sold_amount`. A preprod build (`ec457591…`) backs the differential tests. See §12.
 **Audience:** DexHunter and any aggregator integrating the SaturnSwap central-limit-order-book (CLOB) **natively in their own router**.
 **Naming:** this document uses SaturnSwap's own on-chain field names. It does **not** translate the CLOB into Dexter/Iris AMM-pool terms. (Forcing a CLOB into an AMM-pool abstraction is what broke the earlier Dexter/Iris fork — decimals were assumed, field names diverged. Both are fixed here by being explicit.)
 
@@ -30,9 +30,9 @@ SaturnSwap bakes its two configuration parameters (`fee_address`, `authorize_add
 |---|---|---|---|---|---|---|
 | **Current (1%)** | 1% | 100 | `73990b71041ceade6f867617f6ce9f187ab710ea2bf1ff8db7d0292f` | `addr1z9eejzm3qsww4hn0semp0akwnuv84dcsag4lrludklgzjt675jq4yvpskgayj55xegdp30g5rfynax66r8vgn9fldndsrfnae7` | `0e16cd00b2cde4d9aad3ee30ce05a09d39009bd40e83aa477eee71870a97e8d9#0` | v2 |
 | **Legacy run-off (4%)** | 4% | 400 | `1af84a9e697e1e7b042a0a06f061e88182feb9e9ada950b36a916bd5` | `addr1zyd0sj57d9lpu7cy9g9qdurpazqc9l4eaxk6j59nd2gkh4275jq4yvpskgayj55xegdp30g5rfynax66r8vgn9fldndsqzf5tn` | `86cdaeed2afa48821a229f09582ddc8a350fcea2f770875cd5ea92b230b7a0a8#0` | v2 |
-| **V3 (preprod)** | 1% | 100 | `ec457591a4f5ab0d070146558e5f1729fcc5c0b230472437be337625` | `addr_test1wrky2av35n66krg8q9r9trjlzu5le3wqkgcywfphhcehvfg03jugc` | `efb2c0dc789d9bdf0f3988c01c2ca24fe43f16706086252d7576a6a0ad25fa7e#0` | **v3** |
+| **V3 (mainnet)** | 1% | 100 | `6023f59dce0064f1d6d27594dbea25bc4305a9f6a10f3a064037553a` | `addr1z9sz8avaecqxfuwk6f6efkl2yk7yxpdf76ss7wsxgqm42wh2l9cdyhc0eja9mxq0lgeer90edhlfymnxv2ym3szcetqsp0ume8` | `de19f6a99e0add4019b44f0bf0ad3fd35e59419e8639d5637e46b17c767bedb5#0` | **v3** |
 
-**V3 is a distinct wire format** (§12): its `SwapDatum` has **11 fields** (adds `min_partial_fill` + optional Aegis `coverage`), its `OutputReference` is encoded **flat** (not the V2 nested form), and its `script_data_hash` uses language-views **key 2** (PlutusV3), not key 1. It is on **preprod** (mainnet V3 pending), an **enterprise** script address (type-7, no stake), and its baked `fee_address` is the preprod deployment's — a mainnet V3 will bake a production one. The applied hash is the **hardened** build `ec457591…` (supersedes `06ae8ee4…`: it closes a fill-receipt forgery and a premium under-collection — see §12.4/§12.7). Resolve V3 orders by the payment credential `ec457591…` and use the V3 codec.
+**V3 is a distinct wire format** (§12): its `SwapDatum` has **11 fields** (adds `min_partial_fill` + optional Aegis `coverage`), its `OutputReference` is encoded **flat** (not the V2 nested form), and its `script_data_hash` uses language-views **key 2** (PlutusV3), not key 1. It is **live on mainnet** (`6023f59d…`), a **base** script address (type-1: script payment + key stake), and bakes the **same** production `fee_address` as the V2 deployments. Resolve V3 orders by the payment credential `6023f59d…` and use the V3 codec. A hardened **preprod** build `ec457591…` (order address `addr_test1wrky2av…`, ref `efb2c0dc…#0`, an enterprise/type-7 address whose baked `fee_address` is the preprod deployment's) is kept for the differential tests in `PREPROD_DEPLOYMENTS`; it is not scanned by production discovery.
 
 Notes:
 - The 1% order address is `0x11`-header (type-1: script payment + key stake, mainnet) with stake credential `5ea481523030b23a495286ca1a18bd141a493e9b5a19d889953f6cdb`. The 4% address is the same header type with the same stake credential.
@@ -333,9 +333,9 @@ Transaction:
 ## 12. V3 (PlutusV3): Aegis coverage, partial-fill floor, fill receipts
 
 The V3 `saturn_swap` validator is a superset of V2: the same swap/cancel/relist logic plus three
-additions. It is deployed on **preprod** (§2), an enterprise script address, `fee_percent = 100`
+additions. It is **live on mainnet** (§2, `6023f59d…`), a base script address, `fee_percent = 100`
 (1%, same rate as the mainnet 1% deployment, and the fee is still paid in the sell asset to the
-baked `fee_address`). Everything in §6–§11 still applies; the V3-specific deltas:
+**same** production `fee_address`). Everything in §6–§11 still applies; the V3-specific deltas:
 
 ### 12.1 The FLAT `OutputReference` (the load-bearing V3 ≠ V2 difference)
 
@@ -377,18 +377,27 @@ relist (§8) must carry `min_partial_fill` forward **unchanged** (`is_correct_mi
 
 When `coverage = Some(cov)`, the fill **must** emit a premium **output** (NOT a `treasury_donation` —
 Conway key 22 only reaches the chain treasury) to `cov.vault`, carrying **≥ `required`** of the
-**buy asset**, where (**hardened build `ec457591…`, red-team fix B**):
+**buy asset**, where:
 
 ```
 required = max(1, user_sell_amount * cov.premium_bps / 10000)   # base rounds DOWN, then floor at 1
 ```
 
+> **The premium is OUT OF POCKET for the filler.** `required` (in the **buy** asset) is paid to the
+> vault **on top of** the owner payout — it is **NOT** reflected in the order's `amount_sell`/`amount_buy`
+> or in `priceBaseUnits`. Integrators **MUST subtract `plan.premium.required`** from their
+> profitability/quote for a covered order. The reference filler also **bounds** `premium_bps`
+> (`maxPremiumBps`, default `10_000` = 100%) and refuses to build a covered order above it — a premium
+> `>=` the fill's buy amount is almost certainly malicious/malformed. For an **ADA-buy** covered order
+> the premium output must itself clear the ledger min-UTxO, so it carries an unavoidable ~1 ADA floor
+> even when the raw `premium_bps` premium is tiny.
+
 The base rounds down, and the validator then **floors `required` at 1** so a covered fill can **never
 owe zero** — a premium output is therefore emitted for **every** covered order, regardless of
 `premium_bps` (even `0`). The premium output is tagged with the **same `PaymentDatum{spent order ref}`**
 as the owner/fee outputs and is located by `value_paid_to_with_datum` (**exactly one** output to
-`vault` with that datum — zero or many ⇒ deny). The vault **must be distinct** — this is now
-**enforced on-chain** (`is_vault_distinct`): `vault.payment_credential != owner.payment_credential`
+`vault` with that datum — zero or many ⇒ deny). The vault **must be distinct** — the validator
+**enforces this on-chain** (`is_vault_distinct`): `vault.payment_credential != owner.payment_credential`
 **and** `vault != fee_address`. The owner check is on the **payment credential only**, so a vault that
 shares the owner's payment credential collides even if the stake part differs; the filler mirrors this
 exactly and refuses to build a doomed tx. The relist (§8) must carry the **whole `coverage` forward
@@ -424,13 +433,23 @@ default (pass `mintReceipt: false` to opt out). `MintFillReceipt(order_input_ind
 owner_output_index, receipt_output_index)` = `Constr0[int,int,int]`; `BurnFillReceipt` = `Constr1[]`.
 The receipt's inline `FillReceiptDatum` records `maker`, `order_reference`, `sold_amount`,
 `bought_amount`, the sell/buy asset ids, and `executed_at` (the tx's finite lower validity bound —
-**POSIXTime in milliseconds**, not a slot). Its existence is oracle-free proof of a real fill at
-`price = bought_amount / sold_amount`. The receipt token **name is filler-chosen** (the handler
-requires exactly one token of quantity 1 under the policy but does not constrain the name — it binds
-the datum); this lib uses the UTF-8 bytes of `"SaturnFillReceipt"`.
+**POSIXTime in milliseconds**, not a slot). Its existence is oracle-free proof of a real fill.
 
-The **hardened build `ec457591…` (red-team fix A)** makes the receipt unforgeable — it can only mint
-alongside a *real* fill. `buildTakerFillV3` satisfies the tightened binding exactly:
+> **The raw `bought_amount / sold_amount` ratio is NOT the executed price for an ADA-buy fill.** When
+> the buy asset is ADA the owner output carries `amount_buy` **plus the maker's returned script
+> min-UTxO deposit**, so `bought_amount` overstates the ADA actually bought. The true price is
+> `(bought_amount − script_input_deposit_lovelace) / sold_amount`, and the **authoritative** rate is
+> the datum's `amount_buy / amount_sell` (the limit the maker set), not the raw receipt ratio. For a
+> token-buy fill the returned ADA lands on a separate output, so `bought_amount / sold_amount` is exact.
+
+The receipt token **name is filler-chosen** (the handler requires exactly one token of quantity 1
+under the policy but does not constrain the name — it binds the datum); this lib uses the UTF-8 bytes
+of `"SaturnFillReceipt"`. `mintReceipt` defaults **true** and parks ~1.2–1.7 ADA (reclaimable by
+later spending the receipt UTxO — surfaced as `receiptLovelace` in the fill result) per fill plus a
+marginal minting fee; high-volume fillers that will not use the receipts should pass `mintReceipt: false`.
+
+The V3 validator makes the receipt unforgeable — it can only mint alongside a *real* fill.
+`buildTakerFillV3` satisfies the binding exactly:
 
 1. **`SwapAction` bind.** The order input is spent with `SwapAction(user_sell, input_index,
    output_index)`; the mint handler reads that redeemer at `Spend(order_ref)` and requires
@@ -448,26 +467,20 @@ alongside a *real* fill. `buildTakerFillV3` satisfies the tightened binding exac
 `validFrom` to its slot boundary so `executed_at` equals the POSIXTime the ledger derives from
 `invalid_before` (the slot↔POSIX round-trip is stable at slot boundaries).
 
-### 12.8 On-chain proof (preprod)
+### 12.8 On-chain proof (mainnet)
 
-The **hardened** build `ec457591…` is re-proven on preprod: create hardened orders
-`39c84bbc11d34dbe799df8878f89a66ff6aa1c87fcc3b0d56d659993d5254149` (`#0` uncovered, `#1` covered, `#2`
-covered-vault==owner, `#3` uncovered); **honest fill + legit receipt**
-`77ccbaefcaa7741d1c684c1a7870f4108af8aeb06072e65af09c4350cbb99373` (order `#0` spent with `SwapAction`,
-owner paid PaymentDatum-tagged, a receipt mints under `ec457591…` bound to the real fill — `sold`
-derived, `bought` = owner payout, `executed_at` = ledger POSIXTime); **honest covered fill**
-`3f6e5970824f10f2714162e0d8a4524da1070ff1ab54a622537b8cde3be198e2` (1% premium paid to the distinct
-Aegis vault). Attacks **rejected on-chain**: a cancel-mint forgery (order `#3` spent with
-`CancelAction` while minting a receipt) and a `vault == owner` covered fill (order `#2`).
+V3 is proven end-to-end on **mainnet** at `6023f59d…` (order address `addr1z9sz8ava…`, ref script
+`de19f6a9…#0`). Mainnet tx ids (abbreviated):
 
-The V3 **wire formats** (unchanged by the hardening) were first proven against the pre-hardening build
-`06ae8ee4…`: create-order `477e2997326bc455ab10d20f373d2e7aed5013272e6e1861b50ee06c7f8e28b4`; atomic
-insured swap `c458c09f0985b62f7ed20afc307acc1b183b29c675b92b5e34ab3ce1708d10cf` (covered full fill +
-premium output + a Conway key-22 donation, single signature); uncovered fill + fill-receipt mint
-`d5c1ef1ef0242911ffd7f8f4e8d967ee5978a29c1600481d759c7fce716987dc`; partial fill + relist
-`a0510ef7b9af721a3bb378b4a18ecf892f6f4c7464c424af8f3d8ca8f89b4c97` (the relisted remainder carries
-`min_partial_fill` AND the full `coverage` forward). A **mainnet V3** submit is the only step not yet
-performed for V3.
+- **Create V3 orders:** `b6bcaeb6…`.
+- **Fill + fill-receipt mint:** `bda03d56…` — order spent with `SwapAction`, owner paid
+  PaymentDatum-tagged, a receipt mints under the swap policy id bound to the real fill (`sold` derived,
+  `bought` = owner payout, `executed_at` = ledger POSIXTime).
+- **Insured (covered) fill:** `fe17fb88…` — covered fill + premium output to the distinct Aegis vault.
+- **Partial fill + relist:** `ad182bcd…` — the relisted remainder carries `min_partial_fill` AND the
+  full `coverage` forward.
+- **Cancel (owner):** `dfe44a63…`.
+- **LP add:** `eee72c22…`; **LP withdraw / emit:** `18a01339…`.
 
 ---
 

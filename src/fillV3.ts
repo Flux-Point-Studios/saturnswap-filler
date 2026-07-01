@@ -15,7 +15,13 @@
 //
 // Load-bearing bytes (datum / redeemer / script_data_hash) come from this lib's own V3
 // primitives (flat OutputReference, language-views key 2); tx assembly + ex-unit evaluation
-// use @lucid-evolution/lucid (CML). V3 lives on PREPROD (mainnet V3 pending).
+// use @lucid-evolution/lucid (CML). V3 is LIVE on mainnet (6023f59d…); the preprod build
+// (ec457591…) backs the differential tests.
+//
+// PREMIUM IS OUT-OF-POCKET: for a covered order the premium output (plan.premium.required, in
+// the BUY asset) is paid by the FILLER on top of the owner payout — it is NOT reflected in the
+// order's sell/buy amounts or priceBaseUnits. Integrators MUST subtract plan.premium.required
+// from their profitability/quote.
 
 import type { LucidEvolution, UTxO, Assets, Network } from "@lucid-evolution/lucid";
 import { credentialToAddress, slotToUnixTime } from "@lucid-evolution/lucid";
@@ -75,13 +81,20 @@ export interface FillPlanV3 extends FillPlan {
   premium?: PremiumPlan;
 }
 
+/** Upper bound on a covered order's premium_bps. 10_000 bps = 100%: a premium >= the fill's buy
+ *  amount is almost certainly malicious/malformed, so the planner refuses to build above it. */
+export const DEFAULT_MAX_PREMIUM_BPS = 10_000n;
+
 /** Pure V3 fill plan (full OR partial). Enforces the min_partial_fill floor, emits the Aegis
- *  premium output for covered orders, and (partial) carries coverage + floor forward. */
+ *  premium output for covered orders, and (partial) carries coverage + floor forward. `network`
+ *  is required (no default) so owner/vault addresses can never silently encode to the wrong
+ *  network. `maxPremiumBps` bounds a covered order's premium (default 100%). */
 export function computeFillPlanV3(
   order: Order,
   userSellAmount: bigint,
-  network: Network = "Preprod",
+  network: Network,
   coinsPerUtxoByte: bigint = PREPROD_COINS_PER_UTXO_BYTE,
+  maxPremiumBps: bigint = DEFAULT_MAX_PREMIUM_BPS,
 ): FillPlanV3 {
   if (order.plutusVersion !== "v3") throw new Error("computeFillPlanV3 requires a V3 order");
   if (userSellAmount <= 0n) throw new Error("userSellAmount must be positive");
@@ -162,6 +175,13 @@ export function computeFillPlanV3(
   // EVERY covered fill (there is no zero-premium escape): the vault must be distinct and the
   // required premium is floored at 1.
   if (order.coverage) {
+    // Bound the premium BEFORE computing it: premium_bps is maker-directed and the premium is
+    // paid out of the filler's pocket, so an uncapped/oversized value is a fund-loss vector.
+    if (order.coverage.premiumBps > maxPremiumBps)
+      throw new Error(
+        `coverage premium_bps ${order.coverage.premiumBps} exceeds max ${maxPremiumBps} — a premium ` +
+          `>= the fill's buy amount is almost certainly malicious/malformed; refusing to build`,
+      );
     const vaultAddressBech32 = credAddr(network, order.coverage.vault);
     // is_vault_distinct: vault.payment_credential != owner.payment_credential AND vault != fee.
     // The owner check is on the PAYMENT CREDENTIAL only (a shared payment cred collides even if
@@ -318,6 +338,9 @@ export interface BuildTakerFillV3Options {
   /** override the PlutusV3 cost model used for the self-computed SDH cross-check */
   costModelV3?: bigint[];
   coinsPerUtxoByte?: bigint;
+  /** upper bound on a covered order's premium_bps (default 100% = 10_000); a covered order above
+   *  this is refused as malicious/malformed */
+  maxPremiumBps?: bigint;
   /** mint a CIP-69 fill-receipt alongside the fill (default true); false skips the receipt */
   mintReceipt?: boolean;
   /** desired lower validity bound (POSIX ms) the receipt's executed_at anchors to; defaults to
@@ -336,6 +359,11 @@ export interface TakerFillV3Result {
   txScriptDataHash: string;
   scriptDataHashMatches: boolean;
   plan: FillPlanV3;
+  /** BUY-asset premium the filler pays OUT OF POCKET to the coverage vault (0 when uncovered).
+   *  NOT reflected in the order's sell/buy amounts — subtract it from profitability/quotes. */
+  premiumRequired: bigint;
+  /** lovelace parked on the minted fill-receipt output (reclaimable; 0 when mintReceipt false) */
+  receiptLovelace: bigint;
   /** the minted fill-receipt (undefined when mintReceipt is false) */
   receipt?: {
     /** author-order index of the receipt output = the redeemer's receipt_output_index */
@@ -352,13 +380,15 @@ export interface TakerFillV3Result {
 
 export async function buildTakerFillV3(opts: BuildTakerFillV3Options): Promise<TakerFillV3Result> {
   const { lucid, order, userSellAmount } = opts;
-  const network = opts.network ?? "Preprod";
+  const network = opts.network ?? lucid.config().network;
+  if (!network)
+    throw new Error("network could not be derived from lucid.config(); pass opts.network explicitly");
 
   const pp = await lucid.config().provider!.getProtocolParameters();
   const coinsPerUtxoByte = opts.coinsPerUtxoByte ?? BigInt((pp as { coinsPerUtxoByte: number | bigint }).coinsPerUtxoByte);
   const costModelV3 = opts.costModelV3 ?? cmV3FromPp(pp);
 
-  const plan = computeFillPlanV3(order, userSellAmount, network, coinsPerUtxoByte);
+  const plan = computeFillPlanV3(order, userSellAmount, network, coinsPerUtxoByte, opts.maxPremiumBps);
 
   const [orderUtxo] = await lucid.utxosByOutRef([
     { txHash: order.utxo.txHash, outputIndex: order.utxo.outputIndex },
@@ -415,6 +445,7 @@ export async function buildTakerFillV3(opts: BuildTakerFillV3Options): Promise<T
   // delta, so the receipt datum must match computeFillReceipt exactly. The multi-purpose swap
   // script (spend + mint under the same hash) is resolved from the reference script read above.
   let receiptResult: TakerFillV3Result["receipt"];
+  let receiptLovelaceOut = 0n;
   const mintReceipt = opts.mintReceipt ?? true;
   if (mintReceipt) {
     // Snap the desired lower bound to its slot boundary so executed_at == the POSIXTime the
@@ -439,6 +470,7 @@ export async function buildTakerFillV3(opts: BuildTakerFillV3Options): Promise<T
       },
       coinsPerUtxoByte,
     );
+    receiptLovelaceOut = receiptLovelace;
     const receiptAssets: Assets = { [receiptUnit]: 1n, lovelace: receiptLovelace };
 
     tx = tx
@@ -488,6 +520,8 @@ export async function buildTakerFillV3(opts: BuildTakerFillV3Options): Promise<T
     txScriptDataHash: txSdh,
     scriptDataHashMatches: selfSdh === txSdh,
     plan,
+    premiumRequired: plan.premium?.required ?? 0n,
+    receiptLovelace: receiptLovelaceOut,
     receipt: receiptResult,
   };
 }

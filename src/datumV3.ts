@@ -37,8 +37,6 @@ import {
 export interface Coverage {
   /** Aegis vault the per-fill premium is paid to (a normal output, NOT a treasury donation). */
   vault: OwnerAddress;
-  /** raw vault Address PlutusData — copy verbatim into the coverage carry-forward */
-  vaultRaw: PlutusData;
   /** premium charged per fill = filled_buy_amount * premium_bps / 10000, in the BUY asset */
   premiumBps: bigint;
   /** pin to the Aegis policy / coverage UTxO — the on-chain "Aegis-covered" truth */
@@ -90,7 +88,6 @@ function plutusDataToCoverage(d: PlutusData): Coverage {
   if (bps!.kind !== "int") throw new Error("malformed Coverage premium_bps");
   return {
     vault: plutusDataToAddress(vault!),
-    vaultRaw: vault!,
     premiumBps: bps!.value,
     policyRef: plutusDataToOutputRefV3(policyRef!),
   };

@@ -1,9 +1,9 @@
 // Asserts the V3 codec reproduces REAL on-chain V3 bytes and the V3 script_data_hash recipe.
 //
 // Provenance of the golden datums:
-//   [chain] = the exact definite-CBOR datums the preprod V3 deploy script (v3/deploy/datums.py
-//             in the SaturnSwapContract repo) emitted to create the on-chain V3 orders
-//             (V3_DESIGN.md §6, create-order tx 477e2997…). Real on-chain bytes.
+//   [chain] = the exact definite-CBOR SwapDatum bytes read back from the ledger for the preprod
+//             V3 create-order tx
+//             477e2997326bc455ab10d20f373d2e7aed5013272e6e1861b50ee06c7f8e28b4 (public, on-chain).
 //   [type]  = the Aiken SwapDatum/Coverage field order (11 fields; Coverage{vault, premium_bps,
 //             policy_ref}); OutputReference is FLAT in the V3 stdlib (Constr0[bstr32, ix]).
 
@@ -151,6 +151,11 @@ describe("V3 script_data_hash uses language-views key 2 (PlutusV3), NOT the V2 k
     expect(encodeLanguageViewsV3(cm)).not.toEqual(encodeLanguageViewsV2(cm));
   });
 
+  // The V3 script_data_hash is covered here by the V3(key-2)-vs-V2(key-1) language-views
+  // differential and by the honest-fill on-chain proofs cited in SPEC §12.8. A byte-exact
+  // golden-SDH assertion would require pinning one specific on-chain V3 tx's full redeemer set,
+  // datum set, and the protocol's PlutusV3 cost model at that epoch; those witness bytes are not
+  // vendored in this repo, so that assertion is intentionally left out rather than approximated.
   it("the V3 hash differs from the V2 hash for identical redeemers + cost model", () => {
     const reds = [
       { tag: 0, index: 0, data: swapActionRedeemer(5_000_000n, 0, 0), exUnits: { mem: 500000n, steps: 200000000n } },
@@ -173,23 +178,32 @@ describe("V3 fill-receipt wire form (hardened CIP-69 mint on the swap script; po
   // [type] FillReceiptDatum = Constr0[ maker: Address, order_reference: OutputReference(FLAT),
   //   sold_amount, bought_amount, policy_id_sell, asset_name_sell, policy_id_buy, asset_name_buy,
   //   executed_at ] — 9 positional fields; order_reference uses the FLAT V3 OutputReference.
+  // GOLDEN-HEX with per-field-UNIQUE markers: every positionally-adjacent same-typed field
+  // (sold≠bought, policy_sell≠policy_buy, name_sell≠name_buy) carries a DISTINCT value, so any
+  // positional swap in fillReceiptDatumToPlutusData changes these bytes and the golden catches it.
   const receipt: FillReceiptDatum = {
-    maker: { payment: { type: "key", hash: "5fce592147c520b69d3a485b15447cb24fd59cba6d78f143616effc4" } },
-    orderReference: { txHash: "a1".repeat(32), outputIndex: 0 },
-    soldAmount: 100_000_000n,
-    boughtAmount: 302_047_250n,
-    policyIdSell: "0ff71ae2bdba25bb5e1805983c8e7924edfc77f808f4f8f6cc421ce4",
-    assetNameSell: "45445354",
-    policyIdBuy: "",
-    assetNameBuy: "",
-    executedAt: 1_700_000_000_000n,
+    maker: { payment: { type: "key", hash: "11".repeat(28) } },
+    orderReference: { txHash: "22".repeat(32), outputIndex: 7 },
+    soldAmount: 111_111n,
+    boughtAmount: 222_222n,
+    policyIdSell: "33".repeat(28),
+    assetNameSell: "44",
+    policyIdBuy: "55".repeat(28),
+    assetNameBuy: "66",
+    executedAt: 1_700_000_000_123n,
   };
+  const GOLDEN =
+    "d8799fd8799fd8799f581c11111111111111111111111111111111111111111111111111111111ffd87a9fffffd8799f5820222222222222222222222222222222222222222222222222222222222222222207ff1a0001b2071a0003640e581c333333333333333333333333333333333333333333333333333333334144581c5555555555555555555555555555555555555555555555555555555541661b0000018bcfe5687bff";
 
-  it("FillReceiptDatum round-trips and carries a FLAT order_reference", () => {
-    const hex = plutusToHex(fillReceiptDatumToPlutusData(receipt));
-    expect(decodeFillReceiptDatum(hexToBytes(hex))).toEqual(receipt);
-    // FLAT OutputReference tag: Constr0[ bstr32(a1..a1), 0 ] — no nested TransactionId wrapper.
-    expect(hex).toContain("d8799f5820" + "a1".repeat(32) + "00ff");
+  it("FillReceiptDatum encodes to the golden hex (per-field markers catch a positional swap)", () => {
+    expect(plutusToHex(fillReceiptDatumToPlutusData(receipt))).toBe(GOLDEN);
+    // …and it round-trips structurally.
+    expect(decodeFillReceiptDatum(hexToBytes(GOLDEN))).toEqual(receipt);
+    // FLAT OutputReference tag: Constr0[ bstr32(22..22), 7 ] — no nested TransactionId wrapper.
+    expect(GOLDEN).toContain("d8799f5820" + "22".repeat(32) + "07ff");
+    // sold (111111 = 0x1b207) and bought (222222 = 0x3640e) are DISTINCT ⇒ a sold/bought swap shows.
+    expect(GOLDEN).toContain("1a0001b207");
+    expect(GOLDEN).toContain("1a0003640e");
   });
 
   it("MintFillReceipt(order_input_index, owner_output_index, receipt_output_index) = Constr0[int,int,int]", () => {

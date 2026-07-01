@@ -3,11 +3,17 @@
 // All amounts base units; pure (no chain/lucid provider needed).
 
 import { describe, it, expect } from "vitest";
-import { computeFillPlanV3, computeFillReceipt } from "../../src/fillV3.js";
+import type { LucidEvolution, UTxO } from "@lucid-evolution/lucid";
+import { buildTakerFillV3, computeFillPlanV3, computeFillReceipt } from "../../src/fillV3.js";
 import { decodeFillReceiptDatum, decodeSwapDatumV3Hex, type Coverage } from "../../src/datumV3.js";
 import { hexToBytes } from "../../src/cbor.js";
 import { unit, type Order } from "../../src/discovery.js";
 import { V3_FEE_ADDRESS_PREPROD, V3_FEE_PAYMENT_CRED_PREPROD } from "../../src/contract.js";
+
+// Every order in this file rests on the preprod V3 deployment; wrap the (now network-required)
+// pure planner at the preprod network. `max` optionally overrides the premium_bps bound.
+const planPreprod = (o: Order, amt: bigint, max?: bigint) =>
+  computeFillPlanV3(o, amt, "Preprod", undefined, max);
 
 // Hardened V3 (ec457591…, supersedes 06ae8ee4…): receipt-forgery + premium under-collection fixed.
 const V3_ADDR = "addr_test1wrky2av35n66krg8q9r9trjlzu5le3wqkgcywfphhcehvfg03jugc";
@@ -21,7 +27,6 @@ const OWNER = { payment: { type: "key" as const, hash: "5fce592147c520b69d3a485b
 
 const coverage = (premiumBps: bigint): Coverage => ({
   vault: { payment: { type: "script", hash: VAULT_HASH } },
-  vaultRaw: { kind: "constr", alt: 0, fields: [] },
   premiumBps,
   policyRef: POLICY_REF,
 });
@@ -100,7 +105,7 @@ const uncovered = v3Order({
 
 describe("computeFillPlanV3 — covered full fill emits the Aegis premium output", () => {
   it("buy=ADA: premium is lovelace to the vault (filled_buy * premium_bps / 10000)", () => {
-    const p = computeFillPlanV3(coveredAdaBuy, coveredAdaBuy.buy.amount);
+    const p = planPreprod(coveredAdaBuy, coveredAdaBuy.buy.amount);
     expect(p.premium).toBeDefined();
     expect(p.premium!.required).toBe(3_000_000n); // 300M * 100 / 10000
     expect(Object.keys(p.premium!.assets)).toEqual(["lovelace"]);
@@ -113,7 +118,7 @@ describe("computeFillPlanV3 — covered full fill emits the Aegis premium output
   });
 
   it("buy=TOKEN: premium is the buy token to the vault + min-utxo ADA", () => {
-    const p = computeFillPlanV3(coveredTokenBuy, coveredTokenBuy.buy.amount);
+    const p = planPreprod(coveredTokenBuy, coveredTokenBuy.buy.amount);
     expect(p.premium!.required).toBe(1_000_000n); // 50M * 200 / 10000
     expect(p.premium!.assets[unit(TOKEN, NAME)]).toBe(1_000_000n);
     expect(p.premium!.assets["lovelace"]).toBeGreaterThan(1_000_000n); // min-utxo ADA on the token output
@@ -128,7 +133,7 @@ describe("computeFillPlanV3 — covered full fill emits the Aegis premium output
 
 describe("computeFillPlanV3 — uncovered orders never emit a premium", () => {
   it("no coverage ⇒ plan.premium is undefined", () => {
-    const p = computeFillPlanV3(uncovered, uncovered.buy.amount);
+    const p = planPreprod(uncovered, uncovered.buy.amount);
     expect(p.premium).toBeUndefined();
     expect(p.coverage).toBeNull();
   });
@@ -136,25 +141,25 @@ describe("computeFillPlanV3 — uncovered orders never emit a premium", () => {
 
 describe("computeFillPlanV3 — min_partial_fill floor (V3 #4)", () => {
   it("a partial fill below the floor THROWS (the validator would deny)", () => {
-    expect(() => computeFillPlanV3(coveredAdaBuy, 10_000_000n)).toThrow(/min_partial_fill/);
+    expect(() => planPreprod(coveredAdaBuy, 10_000_000n)).toThrow(/min_partial_fill/);
   });
 
   it("a partial fill at/above the floor is allowed", () => {
-    const p = computeFillPlanV3(coveredAdaBuy, 60_000_000n);
+    const p = planPreprod(coveredAdaBuy, 60_000_000n);
     expect(p.isFullFill).toBe(false);
     expect(p.relist).toBeDefined();
     expect(p.premium!.required).toBe(600_000n); // 60M * 100 / 10000
   });
 
   it("a full fill is always allowed regardless of the floor", () => {
-    const p = computeFillPlanV3(coveredAdaBuy, coveredAdaBuy.buy.amount);
+    const p = planPreprod(coveredAdaBuy, coveredAdaBuy.buy.amount);
     expect(p.isFullFill).toBe(true);
   });
 });
 
 describe("computeFillPlanV3 — partial-fill relist carries coverage + floor forward (V3 #3/#4)", () => {
   it("the relist continuation datum preserves coverage, min_partial_fill, and the relist link", () => {
-    const p = computeFillPlanV3(coveredTokenBuy, 25_000_000n);
+    const p = planPreprod(coveredTokenBuy, 25_000_000n);
     expect(p.relist).toBeDefined();
     expect(p.premium!.required).toBe(500_000n); // 25M * 200 / 10000
     const relisted = decodeSwapDatumV3Hex(p.relist!.datumHex);
@@ -171,7 +176,7 @@ describe("computeFillPlanV3 — partial-fill relist carries coverage + floor for
 describe("computeFillPlanV3 — guards", () => {
   it("rejects a V2 order", () => {
     const v2ish = { ...uncovered, plutusVersion: "v2" as const };
-    expect(() => computeFillPlanV3(v2ish, v2ish.buy.amount)).toThrow(/requires a V3 order/);
+    expect(() => planPreprod(v2ish, v2ish.buy.amount)).toThrow(/requires a V3 order/);
   });
 
   it("rejects a coverage vault that collides with the owner address", () => {
@@ -181,9 +186,9 @@ describe("computeFillPlanV3 — guards", () => {
       buy: { policyId: "", assetName: "", amount: 300_000_000n },
       scriptLovelace: 2_047_250n,
       minPartialFill: 0n,
-      coverage: { vault: OWNER, vaultRaw: { kind: "constr", alt: 0, fields: [] }, premiumBps: 100n, policyRef: POLICY_REF },
+      coverage: { vault: OWNER, premiumBps: 100n, policyRef: POLICY_REF },
     });
-    expect(() => computeFillPlanV3(bad, bad.buy.amount)).toThrow(/distinct/);
+    expect(() => planPreprod(bad, bad.buy.amount)).toThrow(/distinct/);
   });
 
   it("rejects a coverage vault that collides with the fee address", () => {
@@ -195,12 +200,11 @@ describe("computeFillPlanV3 — guards", () => {
       minPartialFill: 0n,
       coverage: {
         vault: { payment: { type: "key", hash: V3_FEE_PAYMENT_CRED_PREPROD } },
-        vaultRaw: { kind: "constr", alt: 0, fields: [] },
         premiumBps: 100n,
         policyRef: POLICY_REF,
       },
     });
-    expect(() => computeFillPlanV3(bad, bad.buy.amount)).toThrow(/distinct/);
+    expect(() => planPreprod(bad, bad.buy.amount)).toThrow(/distinct/);
   });
 });
 
@@ -214,7 +218,7 @@ describe("computeFillPlanV3 — premium ≥1 floor (V3 #6, red-team fix B)", () 
       minPartialFill: 0n,
       coverage: coverage(0n),
     });
-    const p = computeFillPlanV3(zeroBps, zeroBps.buy.amount);
+    const p = planPreprod(zeroBps, zeroBps.buy.amount);
     // the on-chain floor is required = max(1, filled_buy * premium_bps / 10000) = max(1, 0) = 1
     expect(p.premium).toBeDefined();
     expect(p.premium!.required).toBe(1n);
@@ -232,7 +236,7 @@ describe("computeFillPlanV3 — premium ≥1 floor (V3 #6, red-team fix B)", () 
       minPartialFill: 0n,
       coverage: coverage(1n),
     });
-    const p = computeFillPlanV3(tinyBps, 5_000n);
+    const p = planPreprod(tinyBps, 5_000n);
     expect(p.premium!.required).toBe(1n);
     expect(p.premium!.assets[unit(TOKEN, NAME)]).toBe(1n);
   });
@@ -240,7 +244,7 @@ describe("computeFillPlanV3 — premium ≥1 floor (V3 #6, red-team fix B)", () 
 
 describe("computeFillReceipt — the fill-receipt binding (V3 #5, red-team fix A)", () => {
   it("full fill: sold = amount_sell, bought = the buy delivered to the owner output", () => {
-    const plan = computeFillPlanV3(coveredAdaBuy, coveredAdaBuy.buy.amount);
+    const plan = planPreprod(coveredAdaBuy, coveredAdaBuy.buy.amount);
     const r = computeFillReceipt(coveredAdaBuy, plan, coveredAdaBuy.sell.amount, 1_700_000_000_000n);
     expect(r.soldAmount).toBe(100_000_000n); // == order_datum.amount_sell
     // buy=ADA full fill: owner lovelace = amount_buy + script lovelace
@@ -255,7 +259,7 @@ describe("computeFillReceipt — the fill-receipt binding (V3 #5, red-team fix A
   });
 
   it("partial fill: sold = script_input_sell − continuation_sell (ADA-sell)", () => {
-    const plan = computeFillPlanV3(coveredTokenBuy, 25_000_000n);
+    const plan = planPreprod(coveredTokenBuy, 25_000_000n);
     // sell is ADA; the spent order UTxO carries scriptLovelace on-chain
     const scriptInputSell = coveredTokenBuy.scriptValue.lovelace;
     const r = computeFillReceipt(coveredTokenBuy, plan, scriptInputSell, 1_700_000_000_000n);
@@ -267,8 +271,8 @@ describe("computeFillReceipt — the fill-receipt binding (V3 #5, red-team fix A
   });
 
   it("an uncovered order still mints a receipt (the receipt is coverage-independent)", () => {
-    const plan = computeFillPlanV3(coveredTokenBuy, 25_000_000n);
-    const uncoveredPlan = computeFillPlanV3(uncovered, 25_000_000n);
+    const plan = planPreprod(coveredTokenBuy, 25_000_000n);
+    const uncoveredPlan = planPreprod(uncovered, 25_000_000n);
     const rCov = computeFillReceipt(coveredTokenBuy, plan, coveredTokenBuy.scriptValue.lovelace, 1n);
     const rUnc = computeFillReceipt(uncovered, uncoveredPlan, uncovered.scriptValue.lovelace, 1n);
     expect(rUnc.soldAmount).toBe(rCov.soldAmount);
@@ -276,8 +280,69 @@ describe("computeFillReceipt — the fill-receipt binding (V3 #5, red-team fix A
   });
 
   it("rejects a V2 order", () => {
-    const plan = computeFillPlanV3(uncovered, 25_000_000n);
+    const plan = planPreprod(uncovered, 25_000_000n);
     const v2ish = { ...uncovered, plutusVersion: "v2" as const };
     expect(() => computeFillReceipt(v2ish, plan, uncovered.scriptValue.lovelace, 1n)).toThrow(/requires a V3 order/);
+  });
+});
+
+describe("computeFillPlanV3 — the premium is bounded (V3FS-01, fund-loss guard)", () => {
+  // A covered order whose premium_bps forces a premium >= the fill's buy amount is malicious/
+  // malformed: the premium is paid OUT OF the filler's pocket, so the planner must refuse it.
+  const evil = v3Order({
+    txByte: "28",
+    sell: { policyId: TOKEN, assetName: NAME, amount: 100_000_000n },
+    buy: { policyId: "", assetName: "", amount: 300_000_000n },
+    scriptLovelace: 2_047_250n,
+    minPartialFill: 0n,
+    coverage: coverage(10_001n), // > 100%
+  });
+  const edge = v3Order({
+    txByte: "39",
+    sell: { policyId: TOKEN, assetName: NAME, amount: 100_000_000n },
+    buy: { policyId: "", assetName: "", amount: 300_000_000n },
+    scriptLovelace: 2_047_250n,
+    minPartialFill: 0n,
+    coverage: coverage(10_000n), // exactly 100%
+  });
+
+  it("throws when premium_bps exceeds the default max (10_000 = 100%)", () => {
+    expect(() => planPreprod(evil, evil.buy.amount)).toThrow(/exceeds max 10000/);
+  });
+
+  it("builds at exactly the max: a 100% premium equals the whole buy amount", () => {
+    const p = planPreprod(edge, edge.buy.amount);
+    expect(p.premium!.required).toBe(300_000_000n); // 300M * 10000 / 10000
+  });
+
+  it("honours a custom lower maxPremiumBps (refuses an otherwise-valid 100 bps order)", () => {
+    expect(() => planPreprod(coveredAdaBuy, coveredAdaBuy.buy.amount, 50n)).toThrow(/exceeds max 50/);
+    // …and still builds when the bound is at/above the order's premium
+    expect(planPreprod(coveredAdaBuy, coveredAdaBuy.buy.amount, 100n).premium!.required).toBe(3_000_000n);
+  });
+});
+
+describe("computeFillPlanV3 / buildTakerFillV3 — network is required, never defaulted (V3FS-02)", () => {
+  it("a mainnet network yields addr1 owner + vault; preprod yields addr_test1", () => {
+    const m = computeFillPlanV3(coveredAdaBuy, coveredAdaBuy.buy.amount, "Mainnet");
+    expect(m.ownerAddressBech32.startsWith("addr1")).toBe(true);
+    expect(m.premium!.vaultAddressBech32.startsWith("addr1")).toBe(true);
+    const p = computeFillPlanV3(coveredAdaBuy, coveredAdaBuy.buy.amount, "Preprod");
+    expect(p.ownerAddressBech32.startsWith("addr_test1")).toBe(true);
+    expect(p.premium!.vaultAddressBech32.startsWith("addr_test1")).toBe(true);
+  });
+
+  it("buildTakerFillV3 refuses to build when the network cannot be derived from lucid.config()", async () => {
+    const lucid = { config: () => ({}) } as unknown as LucidEvolution;
+    const collateralUtxo: UTxO = { txHash: "00".repeat(32), outputIndex: 0, address: V3_ADDR, assets: {} };
+    await expect(
+      buildTakerFillV3({
+        lucid,
+        order: coveredAdaBuy,
+        userSellAmount: coveredAdaBuy.buy.amount,
+        fundingUtxos: [],
+        collateralUtxo,
+      }),
+    ).rejects.toThrow(/network could not be derived/);
   });
 });
