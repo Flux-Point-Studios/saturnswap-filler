@@ -4,11 +4,13 @@
 // are applied out-of-band only for display/pricing.
 
 import { decodeSwapDatumHex, type SwapDatum } from "./datum.js";
+import { decodeSwapDatumV3Hex, type Coverage } from "./datumV3.js";
 import {
   DEPLOYMENTS,
   deploymentByOrderAddress,
   deploymentByScriptHash,
   type Deployment,
+  type PlutusVersion,
   type Version,
 } from "./contract.js";
 
@@ -37,9 +39,11 @@ export interface Order {
   utxo: { txHash: string; outputIndex: number };
   orderAddress: string;
   version: Version;
+  plutusVersion: PlutusVersion;
   scriptHash: string;
   refScript: { txHash: string; outputIndex: number };
   feePercentX100: number;
+  feeAddress: string;
   datum: SwapDatum;
   scriptValue: ChainValue;
   sell: AssetAmount;
@@ -47,6 +51,10 @@ export interface Order {
   /** amountSell / amountBuy in BASE units (apply decimals out-of-band for a human price) */
   priceBaseUnits: number;
   validBeforeTime: bigint | null;
+  /** V3: minimum buy-asset size of a partial fill (0 = no floor / V2 parity) */
+  minPartialFill: bigint;
+  /** V3: Aegis coverage — Some ⇒ a per-fill premium output to `coverage.vault` is REQUIRED (null for V2) */
+  coverage: Coverage | null;
 }
 
 export interface ChainProvider {
@@ -67,8 +75,17 @@ export function decodeOrderUtxo(u: RawUtxo): Order | undefined {
   if (!dep) return undefined;
   if (!u.inlineDatumHex) return undefined;
   let datum: SwapDatum;
+  let minPartialFill = 0n;
+  let coverage: Coverage | null = null;
   try {
-    datum = decodeSwapDatumHex(u.inlineDatumHex);
+    if (dep.plutusVersion === "v3") {
+      const v3 = decodeSwapDatumV3Hex(u.inlineDatumHex);
+      datum = v3;
+      minPartialFill = v3.minPartialFill;
+      coverage = v3.coverage;
+    } else {
+      datum = decodeSwapDatumHex(u.inlineDatumHex);
+    }
   } catch {
     return undefined;
   }
@@ -86,15 +103,19 @@ export function decodeOrderUtxo(u: RawUtxo): Order | undefined {
     utxo: { txHash: u.txHash, outputIndex: u.outputIndex },
     orderAddress: u.address,
     version: dep.version,
+    plutusVersion: dep.plutusVersion,
     scriptHash: dep.scriptHash,
     refScript: dep.refScript,
     feePercentX100: dep.feePercentX100,
+    feeAddress: dep.feeAddress,
     datum,
     scriptValue: u.value,
     sell,
     buy,
     priceBaseUnits: Number(datum.amountSell) / Number(datum.amountBuy),
     validBeforeTime: datum.validBeforeTime,
+    minPartialFill,
+    coverage,
   };
 }
 

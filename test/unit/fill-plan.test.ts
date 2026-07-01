@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { koiosRowToRawUtxo, decodeOrderUtxo, unit, type Order } from "../../src/discovery.js";
 import { computeFillPlan } from "../../src/fill.js";
-import { FEE_PAYMENT_CRED } from "../../src/contract.js";
+import { FEE_ADDRESS, FEE_PAYMENT_CRED } from "../../src/contract.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = JSON.parse(readFileSync(join(here, "../../fixtures/live_1pct_book.json"), "utf8"));
@@ -20,9 +20,11 @@ const tokenSell1pct: Order = {
   utxo: { txHash: "11".repeat(32), outputIndex: 0 },
   orderAddress: "addr1z9eejzm3qsww4hn0semp0akwnuv84dcsag4lrludklgzjt675jq4yvpskgayj55xegdp30g5rfynax66r8vgn9fldndsrfnae7",
   version: "1pct",
+  plutusVersion: "v2",
   scriptHash: "73990b71041ceade6f867617f6ce9f187ab710ea2bf1ff8db7d0292f",
   refScript: { txHash: "0e16cd00b2cde4d9aad3ee30ce05a09d39009bd40e83aa477eee71870a97e8d9", outputIndex: 0 },
   feePercentX100: 100,
+  feeAddress: FEE_ADDRESS,
   datum: {
     owner: { payment: { type: "key", hash: "5fce592147c520b69d3a485b15447cb24fd59cba6d78f143616effc4" }, stake: { type: "key", hash: "96a62ca41357a962e53c93308fe761a4b244f4cf065ada8f912cc305" } },
     ownerRaw: { kind: "constr", alt: 0, fields: [] },
@@ -40,6 +42,8 @@ const tokenSell1pct: Order = {
   buy: { policyId: "", assetName: "", amount: 12_705_491n },
   priceBaseUnits: 4_235_165 / 12_705_491,
   validBeforeTime: null,
+  minPartialFill: 0n,
+  coverage: null,
 };
 
 describe("computeFillPlan — 1% ADA-sell worked order (buy cMATRA), full fill", () => {

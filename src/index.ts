@@ -6,11 +6,14 @@
 export * from "./contract.js";
 export * from "./plutus.js";
 export * from "./datum.js";
+export * from "./datumV3.js";
 export * from "./ratio.js";
 export * from "./sort.js";
 export * from "./scriptDataHash.js";
 export * from "./minUtxo.js";
+export * from "./outputs.js";
 export * from "./discovery.js";
 export * from "./fill.js";
+export * from "./fillV3.js";
 export * from "./cancel.js";
 export { CborReader, CborWriter } from "./cbor.js";

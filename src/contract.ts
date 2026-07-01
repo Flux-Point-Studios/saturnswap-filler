@@ -9,18 +9,27 @@
 // MUST be filled with fee_percent = 100. Mixing both in one tx is fine as long as each
 // order's fee output uses its OWN fee_percent + its OWN per-order PaymentDatum.
 
-export type Version = "1pct" | "4pct";
+export type Version = "1pct" | "4pct" | "v3";
+export type PlutusVersion = "v2" | "v3";
+export type Network = "mainnet" | "preprod";
 
 export interface Deployment {
   version: Version;
   /** applied script hash = the order address payment credential */
   scriptHash: string;
-  /** order script address (bech32, base addr type-1 = script payment + key stake) */
+  /** order script address (bech32) */
   orderAddress: string;
   /** reference-script UTxO carrying the validator (spend via this) */
   refScript: { txHash: string; outputIndex: number };
   /** fee_percent x 100 (matches the Aiken constant; calculate_fee divides by 10000) */
   feePercentX100: number;
+  /** Plutus language of the validator — decides the SwapDatum wire form (V3 = 11 fields,
+   *  flat OutputReference) and the script_data_hash language-views key (V2 = 1, V3 = 2). */
+  plutusVersion: PlutusVersion;
+  /** which network this deployment lives on (V3 is preprod-only for now) */
+  network: Network;
+  /** the baked fee_address the sell-asset fee output is paid to for THIS deployment */
+  feeAddress: string;
 }
 
 // fee_address baked into BOTH validators (the fee output goes here for either version).
@@ -31,9 +40,21 @@ export const FEE_PAYMENT_CRED = "cd51fc17182a3b82f3b776e8a5a0d8808e6fc520fa84550
 export const FEE_STAKE_CRED = "63c28615bf264e2f5857c9e455dd8eb465cae43e91bef062dbd6b606";
 
 // authorize_address — a credential baked into the validator (readable on-chain), identical
-// for both deployments. Aggregators NEVER hold this key, so the non-auth path (this lib)
-// pays the fee in the sell asset to fee_address instead.
+// for both mainnet deployments. Aggregators NEVER hold this key, so the non-auth path (this
+// lib) pays the fee in the sell asset to fee_address instead.
 export const AUTHORIZE_PAYMENT_CRED = "7c2328db12987149ce8fdbbaa932c11542e24d6bd2d4876abffa58b8";
+
+// ---- V3 (PlutusV3, PREPROD) ----
+// The V3 saturn_swap validator adds the min_partial_fill floor + optional Aegis Coverage
+// (a per-fill premium OUTPUT to the coverage vault; NOT a treasury_donation). It is deployed
+// on PREPROD (mainnet V3 is pending). Its baked fee_address is read from the preprod reference
+// script; mainnet V3 will bake a production fee_address. fee_percent is compiled in at 100
+// (1%), the same rate as the mainnet 1% deployment. The order address is an ENTERPRISE script
+// address (type-7, no stake), unlike the mainnet base addresses.
+export const V3_FEE_ADDRESS_PREPROD =
+  "addr_test1vrjau4npl8vg8fvp38ahj3lxu3wtlp3qyh2agu4u6vqxlds065ldr";
+export const V3_FEE_PAYMENT_CRED_PREPROD =
+  "e5de5661f9d883a58189fb7947e6e45cbf862025d5d472bcd3006fb6";
 
 // Ratio scale (the validator's ratio helpers) — all roundings are UP.
 export const RATIO_SCALE = 1_000_000_000_000n;
@@ -42,6 +63,7 @@ export const RATIO_SCALE = 1_000_000_000_000n;
 // so total_fee = new_swap_amount_sell * fee_percent_x100 / 10000 with the PER-DEPLOYMENT rate.
 export const FEE_PERCENT_X100 = 100; // current 1%
 export const LEGACY_FEE_PERCENT_X100 = 400; // legacy 4% run-off
+export const V3_FEE_PERCENT_X100 = 100; // V3 (1%)
 
 export const DEPLOYMENTS: Deployment[] = [
   {
@@ -51,6 +73,9 @@ export const DEPLOYMENTS: Deployment[] = [
       "addr1z9eejzm3qsww4hn0semp0akwnuv84dcsag4lrludklgzjt675jq4yvpskgayj55xegdp30g5rfynax66r8vgn9fldndsrfnae7",
     refScript: { txHash: "0e16cd00b2cde4d9aad3ee30ce05a09d39009bd40e83aa477eee71870a97e8d9", outputIndex: 0 },
     feePercentX100: FEE_PERCENT_X100,
+    plutusVersion: "v2",
+    network: "mainnet",
+    feeAddress: FEE_ADDRESS,
   },
   {
     version: "4pct",
@@ -59,6 +84,19 @@ export const DEPLOYMENTS: Deployment[] = [
       "addr1zyd0sj57d9lpu7cy9g9qdurpazqc9l4eaxk6j59nd2gkh4275jq4yvpskgayj55xegdp30g5rfynax66r8vgn9fldndsqzf5tn",
     refScript: { txHash: "86cdaeed2afa48821a229f09582ddc8a350fcea2f770875cd5ea92b230b7a0a8", outputIndex: 0 },
     feePercentX100: LEGACY_FEE_PERCENT_X100,
+    plutusVersion: "v2",
+    network: "mainnet",
+    feeAddress: FEE_ADDRESS,
+  },
+  {
+    version: "v3",
+    scriptHash: "06ae8ee43befbe36faa8ad239433a411201dcbe18f6721b60c9379bb",
+    orderAddress: "addr_test1wqr2arhy80hmudh64zkj89pn5sgjq8wtux8kwgdkpjfhnwczwmwqk",
+    refScript: { txHash: "8523aaaf17eb302905bf16dc9b8a53f920bd8a9771e6eb374ce1fc18cf5b50a0", outputIndex: 0 },
+    feePercentX100: V3_FEE_PERCENT_X100,
+    plutusVersion: "v3",
+    network: "preprod",
+    feeAddress: V3_FEE_ADDRESS_PREPROD,
   },
 ];
 

@@ -68,6 +68,20 @@ Primitives (independently testable / reusable)
 - `computeScriptDataHash` / `encodeLanguageViewsV2` / `encodeRedeemerMap` — self-computed Conway SDH.
 - `DEPLOYMENTS`, `deploymentByOrderAddress`, `deploymentByScriptHash`, `FEE_ADDRESS`.
 
+V3 (PlutusV3, preprod — Aegis coverage + partial-fill floor + fill receipts; SPEC §12)
+- Discovery decodes V3 orders automatically (resolved by the V3 script hash) and surfaces
+  `order.minPartialFill` + `order.coverage` (`null` when uncovered).
+- `computeFillPlanV3(order, userSellAmount, network?, coinsPerUtxoByte?)` → `FillPlanV3` — the V2 plan
+  plus the **Aegis premium output** (`plan.premium`, buy asset to `coverage.vault`), the
+  `min_partial_fill` floor, and the coverage/floor carry-forward on the relist.
+- `buildTakerFillV3({ lucid, order, userSellAmount, fundingUtxos, collateralUtxo, network?, ... })` —
+  assembles the unsigned V3 tx (owner + fee + premium + relist), cross-checked against the self-computed
+  PlutusV3 `script_data_hash`.
+- V3 codec: `decodeSwapDatumV3` / `swapDatumV3ToPlutusData`, `coverageToPlutusData`, `paymentDatumV3`
+  and `outputRefV3ToPlutusData` (**flat** `OutputReference`), plus `fillReceiptDatum*` /
+  `mintFillReceiptRedeemer` for the optional CIP-69 receipt. SDH: `computeScriptDataHashV3` /
+  `encodeLanguageViewsV3` (language-views key 2). `premiumForFill(filledBuy, premiumBps)`.
+
 ## Status
 
 | Feature | Status |
@@ -80,6 +94,9 @@ Primitives (independently testable / reusable)
 | `CancelAction` builder (owner-only, key-hash owner) | Implemented; script-owner cancels refused |
 | Self-computed Conway SDH | Implemented; equals the builder's SDH and accepted by the ledger |
 | Exact min-UTxO | Implemented — `(size+160)*coinsPerUtxoByte` over the output incl. its inline PaymentDatum |
+| **V3 codec** (11-field datum, flat `OutputReference`, `Coverage`) | Implemented; differential-tested against real preprod on-chain datums |
+| **V3 script_data_hash** (language-views key 2, bare PlutusV3 cost model) | Implemented; distinct from the V2 key-1 recipe |
+| **V3 covered-order fill** (`computeFillPlanV3`: premium output + `min_partial_fill` floor + coverage carry-forward) | Implemented; unit-proven. On-chain proven on **preprod** (mainnet V3 pending) |
 
 ### On-chain proofs (non-auth taker fills built by this library)
 
@@ -88,3 +105,12 @@ Primitives (independently testable / reusable)
 - **Preprod — 1% partial fill + §8 relist:** [`fdf5cab313e0242c677d09bf2890ecb4393d365bddf4eebfea21ea1c48e548eb`](https://preprod.cexplorer.io/tx/fdf5cab313e0242c677d09bf2890ecb4393d365bddf4eebfea21ea1c48e548eb) — block 4880596.
 
 The **4% branch** is build- and UPLC-eval-proven (a non-auth fill against the mainnet FRENCHIE 4% order, fee output at the 4% rate to the shared `fee_address`, ex-units mem 331449 / steps 112,716,586) but **not yet submitted on-chain**. Its construction is byte-identical to the proven 1% path except the validator's compiled `fee_percent` constant (400 vs 100).
+
+### V3 on-chain proofs (preprod)
+
+V3's datum/redeemer/`script_data_hash` wire formats and the covered-order premium rule are proven on **preprod** (V3 mainnet is pending):
+
+- **Create order:** [`477e2997326bc455ab10d20f373d2e7aed5013272e6e1861b50ee06c7f8e28b4`](https://preprod.cexplorer.io/tx/477e2997326bc455ab10d20f373d2e7aed5013272e6e1861b50ee06c7f8e28b4) — 4 SwapDatum orders rest at the V3 address (covered / uncovered / covered+floor / uncovered).
+- **Atomic insured swap:** [`c458c09f0985b62f7ed20afc307acc1b183b29c675b92b5e34ab3ce1708d10cf`](https://preprod.cexplorer.io/tx/c458c09f0985b62f7ed20afc307acc1b183b29c675b92b5e34ab3ce1708d10cf) — covered full fill + premium output to the Aegis vault + a Conway key-22 donation, single signature.
+- **Uncovered fill + fill-receipt mint:** [`d5c1ef1ef0242911ffd7f8f4e8d967ee5978a29c1600481d759c7fce716987dc`](https://preprod.cexplorer.io/tx/d5c1ef1ef0242911ffd7f8f4e8d967ee5978a29c1600481d759c7fce716987dc).
+- **Partial fill + relist (coverage + floor carried forward):** [`a0510ef7b9af721a3bb378b4a18ecf892f6f4c7464c424af8f3d8ca8f89b4c97`](https://preprod.cexplorer.io/tx/a0510ef7b9af721a3bb378b4a18ecf892f6f4c7464c424af8f3d8ca8f89b4c97).

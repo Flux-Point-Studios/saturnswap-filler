@@ -62,9 +62,11 @@ function tokenSellOrder(feePercentX100: number, version: Order["version"], scrip
     utxo: { txHash: txByte.repeat(32), outputIndex: 0 },
     orderAddress: addr,
     version,
+    plutusVersion: "v2",
     scriptHash,
     refScript: { txHash: ref, outputIndex: 0 },
     feePercentX100,
+    feeAddress: FEE_ADDRESS,
     datum: {
       owner: OWNER,
       ownerRaw: { kind: "constr", alt: 0, fields: [] },
@@ -82,6 +84,8 @@ function tokenSellOrder(feePercentX100: number, version: Order["version"], scrip
     buy: { policyId: "", assetName: "", amount: 300_000_000n },
     priceBaseUnits: 100_000_000 / 300_000_000,
     validBeforeTime: null,
+    minPartialFill: 0n,
+    coverage: null,
   };
 }
 
@@ -111,8 +115,8 @@ describe("4% fee math (calculate_fee with fee_percent_x100 = 400, rounds DOWN)",
 });
 
 describe("per-order deployment resolution knows BOTH versions", () => {
-  it("DEPLOYMENTS carries the 1% and the 4% deployment", () => {
-    expect(DEPLOYMENTS.map((d) => d.version).sort()).toEqual(["1pct", "4pct"]);
+  it("DEPLOYMENTS carries the 1%, 4%, and V3 deployments", () => {
+    expect(DEPLOYMENTS.map((d) => d.version).sort()).toEqual(["1pct", "4pct", "v3"]);
   });
 
   it("deploymentByScriptHash(1af84a9e…) -> 4pct, fee 400, ref 86cdaeed…#0", () => {

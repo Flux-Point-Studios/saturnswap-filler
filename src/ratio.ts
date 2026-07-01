@@ -48,6 +48,17 @@ export function fillSellAndFee(
   return { newSwapAmountSell, totalFee };
 }
 
+/**
+ * V3 Aegis premium for this fill (the validator's `premium_paid_to_vault`):
+ *   required = filled_buy_amount * premium_bps / 10000   (integer division, rounds DOWN)
+ * denominated in the order's BUY asset, paid to the coverage vault. `filled_buy_amount` is the
+ * user_sell_amount (the buy asset delivered this fill). required <= 0 ⇒ no premium output.
+ */
+export function premiumForFill(filledBuyAmount: bigint, premiumBps: bigint): bigint {
+  if (filledBuyAmount <= 0n || premiumBps <= 0n) return 0n;
+  return (filledBuyAmount * premiumBps) / 10_000n;
+}
+
 const TWO_ADA = 2_000_000n;
 
 /**
