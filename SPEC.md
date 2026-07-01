@@ -472,15 +472,15 @@ The V3 validator makes the receipt unforgeable — it can only mint alongside a 
 V3 is proven end-to-end on **mainnet** at `6023f59d…` (order address `addr1z9sz8ava…`, ref script
 `de19f6a9…#0`). Mainnet tx ids (abbreviated):
 
-- **Create V3 orders:** `b6bcaeb6…`.
-- **Fill + fill-receipt mint:** `bda03d56…` — order spent with `SwapAction`, owner paid
+- **Create V3 orders:** `b6bcaeb69401127ed650fea550c87464c7fed8aeef05f25950738db6ece754cc`.
+- **Fill + fill-receipt mint:** `bda03d5624466ed0d3838ed53c514b392e7bde6418bde08b159c959d135c7b98` — order spent with `SwapAction`, owner paid
   PaymentDatum-tagged, a receipt mints under the swap policy id bound to the real fill (`sold` derived,
   `bought` = owner payout, `executed_at` = ledger POSIXTime).
-- **Insured (covered) fill:** `fe17fb88…` — covered fill + premium output to the distinct Aegis vault.
-- **Partial fill + relist:** `ad182bcd…` — the relisted remainder carries `min_partial_fill` AND the
+- **Insured (covered) fill:** `fe17fb88fe4282e133e980808b9e11fc92aa0f7fe1ee3f89f3ab7a77abe4d784` — covered fill + premium output to the distinct Aegis vault.
+- **Partial fill + relist:** `ad182bcd7273ed7130ac22568ee9ddb0890f90db7040dd68e2bafa69342805b3` — the relisted remainder carries `min_partial_fill` AND the
   full `coverage` forward.
-- **Cancel (owner):** `dfe44a63…`.
-- **LP add:** `eee72c22…`; **LP withdraw / emit:** `18a01339…`.
+- **Cancel (owner):** `dfe44a63ea8ba326d15562608e6ab2c5d30718414006fcabc58c542237e66813`.
+- **LP add:** `eee72c22b0482043da8ac46576e42ea5f3091888aa27f16902dc49ac78a45561`; **LP withdraw / emit:** `18a0133987f8f2f308b5f62fb319d64a5276896585d35beab7efd8ea1edfd14e`.
 
 ---
 

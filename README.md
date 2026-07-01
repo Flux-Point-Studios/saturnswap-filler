@@ -144,10 +144,10 @@ V3 is **live on mainnet** at `6023f59dce0064f1d6d27594dbea25bc4305a9f6a10f3a0640
 `min_partial_fill` floor + coverage carry-forward, cancels, and the LP emit/withdraw path are all
 proven on mainnet (mainnet tx ids, abbreviated):
 
-- **Create V3 orders:** `b6bcaeb6…`
-- **Fill + fill-receipt mint:** `bda03d56…` — owner paid PaymentDatum-tagged, a fill-receipt mints under the swap policy id bound to the real fill (`sold` derived, `bought` = owner payout, `executed_at` = ledger POSIXTime).
-- **Insured (covered) fill:** `fe17fb88…` — covered fill + premium output to the distinct Aegis vault.
-- **Partial fill + relist:** `ad182bcd…` — the relisted remainder carries `min_partial_fill` AND the full `coverage` forward.
-- **Cancel (owner):** `dfe44a63…`
-- **LP add:** `eee72c22…` — adds liquidity (emits orders).
-- **LP withdraw / emit:** `18a01339…`
+- **Create V3 orders:** `b6bcaeb69401127ed650fea550c87464c7fed8aeef05f25950738db6ece754cc`
+- **Fill + fill-receipt mint:** `bda03d5624466ed0d3838ed53c514b392e7bde6418bde08b159c959d135c7b98` — owner paid PaymentDatum-tagged, a fill-receipt mints under the swap policy id bound to the real fill (`sold` derived, `bought` = owner payout, `executed_at` = ledger POSIXTime).
+- **Insured (covered) fill:** `fe17fb88fe4282e133e980808b9e11fc92aa0f7fe1ee3f89f3ab7a77abe4d784` — covered fill + premium output to the distinct Aegis vault.
+- **Partial fill + relist:** `ad182bcd7273ed7130ac22568ee9ddb0890f90db7040dd68e2bafa69342805b3` — the relisted remainder carries `min_partial_fill` AND the full `coverage` forward.
+- **Cancel (owner):** `dfe44a63ea8ba326d15562608e6ab2c5d30718414006fcabc58c542237e66813`
+- **LP add:** `eee72c22b0482043da8ac46576e42ea5f3091888aa27f16902dc49ac78a45561` — adds liquidity (emits orders).
+- **LP withdraw / emit:** `18a0133987f8f2f308b5f62fb319d64a5276896585d35beab7efd8ea1edfd14e`
