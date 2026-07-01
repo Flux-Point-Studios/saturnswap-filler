@@ -19,9 +19,11 @@ const scriptOwnerOrder: Order = {
   utxo: { txHash: "ab".repeat(32), outputIndex: 0 },
   orderAddress: "addr1z9eejzm3qsww4hn0semp0akwnuv84dcsag4lrludklgzjt675jq4yvpskgayj55xegdp30g5rfynax66r8vgn9fldndsrfnae7",
   version: "1pct",
+  plutusVersion: "v2",
   scriptHash: "73990b71041ceade6f867617f6ce9f187ab710ea2bf1ff8db7d0292f",
   refScript: { txHash: "0e16cd00b2cde4d9aad3ee30ce05a09d39009bd40e83aa477eee71870a97e8d9", outputIndex: 0 },
   feePercentX100: 100,
+  feeAddress: "addr1q8x4rlqhrq4rhqhnkamw3fdqmzqgum79yragg4gptcjpphmrc2rpt0exfch4s47fu32amr45vh9wg053hmcx9k7kkcrq6kxftd",
   datum: {
     owner: { payment: { type: "script", hash: "bec4575e6b77dfd0f60ccf510b0aa3dfc8ef69faa9774928130a849c" } },
     ownerRaw: { kind: "constr", alt: 0, fields: [] },
@@ -39,6 +41,8 @@ const scriptOwnerOrder: Order = {
   buy: { policyId: "7ff33a5565393dc47b48ac47becc12d92c9952e724e8446dfb6adc66", assetName: "634d41545241", amount: 1_000n },
   priceBaseUnits: 1000,
   validBeforeTime: null,
+  minPartialFill: 0n,
+  coverage: null,
 };
 
 describe("CancelAction", () => {

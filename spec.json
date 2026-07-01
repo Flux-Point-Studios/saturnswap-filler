@@ -2,8 +2,8 @@
   "name": "saturn_swap",
   "title": "SaturnSwap saturn_swap CLOB — Contract Integration Spec",
   "description": "Neutral on-chain integration spec for the SaturnSwap central-limit-order-book validator. Two in-scope deployments: the current 1% validator and the optional legacy 4% run-off validator (same baked fee_address + authorize credential; only fee_percent + ref script differ). Aggregators read resting order UTxOs and build taker fills directly on-chain; no SaturnSwap API and no Dexter/AMM-pool abstraction. Field names are SaturnSwap's own. All amounts are base units.",
-  "version": "1.1.0",
-  "verifiedAt": "2026-06-30",
+  "version": "1.2.0",
+  "verifiedAt": "2026-07-01",
   "verifiedAgainst": ["mainnet (Koios, read-only): 1% + 4% addresses, baked parameters, fee_percent (100 and 400), wire formats, script_data_hash recipe", "the saturn_swap validator's on-chain behavior (both deployments)", "on-chain reference filler txs (mainnet 1% + preprod 1% and 4%)"],
   "provenance": {
     "onChainProven": ["1% reference script decoded from Koios: addresses + baked Address parameters (fee_address, authorize_address)", "fee_percent = 100 baked into the 1% validator, fee_percent = 400 baked into the 4% run-off validator (shared fee_address + authorize credential)", "SwapDatum / SwapRedeemer / PaymentDatum wire formats", "Conway script_data_hash recipe", "the non-auth sell-asset fee taker-fill path (1% rate submitted + confirmed on-chain; 4% rate build+eval-proven, not yet submitted)"],
@@ -45,6 +45,34 @@
       "plutusVersion": "v2",
       "status": "active",
       "note": "OPTIONAL, in scope. Legacy 4% run-off book: orders from before the 1% cutover may still rest here and are fillable for extra depth. This validator bakes fee_percent=400, so its fee output MUST use feePercentX100=400 (the 1% recipe underpays 4x -> is_fee_paid_to_address false -> DENY). Same baked fee_address + authorize credential as the 1% deployment; only fee_percent and the ref script differ."
+    },
+    {
+      "label": "v3",
+      "feePercent": 1,
+      "feePercentX100": 100,
+      "scriptHash": "6023f59dce0064f1d6d27594dbea25bc4305a9f6a10f3a064037553a",
+      "scriptAddress": "addr1z9sz8avaecqxfuwk6f6efkl2yk7yxpdf76ss7wsxgqm42wh2l9cdyhc0eja9mxq0lgeer90edhlfymnxv2ym3szcetqsp0ume8",
+      "addressHeaderByte": "0x11",
+      "refScriptUtxo": "de19f6a99e0add4019b44f0bf0ad3fd35e59419e8639d5637e46b17c767bedb5#0",
+      "feeAddress": "addr1q8x4rlqhrq4rhqhnkamw3fdqmzqgum79yragg4gptcjpphmrc2rpt0exfch4s47fu32amr45vh9wg053hmcx9k7kkcrq6kxftd",
+      "plutusVersion": "v3",
+      "network": "mainnet",
+      "status": "active",
+      "note": "V3 (PlutusV3), LIVE ON MAINNET (6023f59d…) — the default V3 discovery target. Base script address (type-1: script payment + key stake); bakes the SAME production fee_address as the V2 deployments. DISTINCT wire format from V2 (see the v3 object): 11-field SwapDatum (adds min_partial_fill + optional Aegis coverage), FLAT OutputReference (Constr0[bstr32, ix], used in SwapDatum.output_reference, Coverage.policy_ref, AND PaymentDatum), and script_data_hash language-views key 2 (NOT the V2 key 1). Fee is still 1% in the sell asset to the baked fee_address. A COVERED order additionally requires a per-fill premium output (in the BUY asset, paid OUT OF POCKET by the filler on top of the owner payout — NOT reflected in amount_sell/amount_buy) to a vault distinct from owner/fee (floored at 1 unit) or the validator denies."
+    },
+    {
+      "label": "v3-preprod",
+      "feePercent": 1,
+      "feePercentX100": 100,
+      "scriptHash": "ec457591a4f5ab0d070146558e5f1729fcc5c0b230472437be337625",
+      "scriptAddress": "addr_test1wrky2av35n66krg8q9r9trjlzu5le3wqkgcywfphhcehvfg03jugc",
+      "addressHeaderByte": "0x70",
+      "refScriptUtxo": "efb2c0dc789d9bdf0f3988c01c2ca24fe43f16706086252d7576a6a0ad25fa7e#0",
+      "feeAddress": "addr_test1vrjau4npl8vg8fvp38ahj3lxu3wtlp3qyh2agu4u6vqxlds065ldr",
+      "plutusVersion": "v3",
+      "network": "preprod",
+      "status": "test-only",
+      "note": "Hardened PREPROD V3 build (ec457591…), kept for the differential tests (PREPROD_DEPLOYMENTS). Enterprise script address (type-7, no stake); its baked fee_address is the preprod deployment's. NOT scanned by production discovery. Same wire format as the mainnet V3."
     }
   ],
   "optional4pctRunoff": {
@@ -191,6 +219,90 @@
       "source": "the live Conway script_data_hash recipe the ledger accepts (proven on-chain; see provenance.onChainProvenNonAuthFill)",
       "legacyPathToAvoid": "a variant that tag24-wraps the cost model + uses an empty 0x80 datums array is rejected by the ledger (PPViewHashesDontMatch); do not use it.",
       "provenance": "Both this script_data_hash recipe AND the takerFill sell-asset fee-output construction are on-chain-proven — see top-level provenance.onChainProvenNonAuthFill."
+    }
+  },
+  "v3": {
+    "network": "mainnet",
+    "plutusVersion": "v3",
+    "status": "LIVE on mainnet (6023f59d…) and PROVEN on-chain",
+    "scriptHash": "6023f59dce0064f1d6d27594dbea25bc4305a9f6a10f3a064037553a",
+    "scriptAddress": "addr1z9sz8avaecqxfuwk6f6efkl2yk7yxpdf76ss7wsxgqm42wh2l9cdyhc0eja9mxq0lgeer90edhlfymnxv2ym3szcetqsp0ume8",
+    "refScriptUtxo": "de19f6a99e0add4019b44f0bf0ad3fd35e59419e8639d5637e46b17c767bedb5#0",
+    "feePercentX100": 100,
+    "feeAddress": "addr1q8x4rlqhrq4rhqhnkamw3fdqmzqgum79yragg4gptcjpphmrc2rpt0exfch4s47fu32amr45vh9wg053hmcx9k7kkcrq6kxftd",
+    "preprodTestBuild": {
+      "scriptHash": "ec457591a4f5ab0d070146558e5f1729fcc5c0b230472437be337625",
+      "scriptAddress": "addr_test1wrky2av35n66krg8q9r9trjlzu5le3wqkgcywfphhcehvfg03jugc",
+      "refScriptUtxo": "efb2c0dc789d9bdf0f3988c01c2ca24fe43f16706086252d7576a6a0ad25fa7e#0",
+      "feeAddress": "addr_test1vrjau4npl8vg8fvp38ahj3lxu3wtlp3qyh2agu4u6vqxlds065ldr",
+      "note": "Hardened preprod V3 build kept for the differential tests (PREPROD_DEPLOYMENTS). Enterprise/type-7 address; same wire format as the mainnet V3. NOT scanned by production discovery."
+    },
+    "outputReference": {
+      "encoding": "FLAT: Constr0[bstr32(tx_id), uint(output_index)] — V3 stdlib defines TransactionId as a bytes alias (Hash<Blake2b_256>), NOT a record. V2 nests it: Constr0[Constr0[bstr32], uint].",
+      "appliesTo": ["SwapDatum.output_reference (field 8)", "Coverage.policy_ref", "PaymentDatum.output_reference (the double-satisfaction tag on owner/fee/premium/relist outputs)"],
+      "freshOrderSentinel": "tx_id = 32 zero bytes (a Blake2b_256 width), output_index = 0",
+      "critical": "Using the V2 nested OutputReference on a V3 fill makes the PaymentDatum mismatch and the validator DENIES."
+    },
+    "datum": {
+      "name": "SwapDatum",
+      "constrAlternative": 0,
+      "fieldCount": 11,
+      "prefix": "fields 0-8 are the V2 SwapDatum (see datum), but with the FLAT output_reference at field 8",
+      "added": [
+        {"index": 9, "name": "min_partial_fill", "type": "Int", "units": "buy-asset base units", "desc": "minimum size of any PARTIAL fill; 0 = no floor (V2 parity)"},
+        {"index": 10, "name": "coverage", "type": "Option<Coverage>", "desc": "Some ⇒ Aegis-covered (a per-fill premium output to coverage.vault is REQUIRED); None ⇒ uncovered / inert"}
+      ],
+      "coverage": {
+        "name": "Coverage",
+        "constrAlternative": 0,
+        "encoding": "Constr0[ vault: Address, premium_bps: Int, policy_ref: OutputReference(FLAT) ]",
+        "fields": [
+          {"index": 0, "name": "vault", "type": "Address", "desc": "the Aegis vault the per-fill premium is paid to (a normal output, NOT a treasury_donation). Must be distinct from the owner and fee addresses."},
+          {"index": 1, "name": "premium_bps", "type": "Int", "desc": "per-fill premium in basis points of the filled buy-leg"},
+          {"index": 2, "name": "policy_ref", "type": "OutputReference(FLAT)", "desc": "pins the on-chain Aegis policy/coverage UTxO — the 'Aegis-covered' truth for indexers/UI"}
+        ]
+      }
+    },
+    "minPartialFill": {
+      "rule": "A PARTIAL fill (user_sell_amount < amount_buy) must satisfy user_sell_amount >= min_partial_fill or the validator DENIES (is_fill_above_floor). A FULL fill is always allowed. min_partial_fill = 0 disables the floor.",
+      "carryForward": "the partial-fill relist must carry min_partial_fill forward UNCHANGED (is_correct_min_partial_fill)."
+    },
+    "premium": {
+      "appliesWhen": "coverage = Some(cov) — for EVERY covered fill, regardless of premium_bps",
+      "formula": "required = max(1, user_sell_amount * cov.premium_bps / 10000) — the base rounds DOWN, then the validator floors it at 1 unit of the BUY asset so a covered fill can NEVER owe zero.",
+      "outOfPocket": "required (in the BUY asset) is paid by the FILLER on top of the owner payout; it is NOT reflected in amount_sell/amount_buy or priceBaseUnits. Integrators MUST subtract plan.premium.required from their profitability/quote. For an ADA-buy covered order the premium output must clear the ledger min-UTxO, so it carries an unavoidable ~1 ADA floor even when the raw premium is tiny.",
+      "bounded": "computeFillPlanV3/buildTakerFillV3 refuse a covered order whose premium_bps exceeds maxPremiumBps (default 10000 = 100%) — a premium >= the fill's buy amount is almost certainly malicious/malformed (V3FS-01).",
+      "output": "a normal tx OUTPUT to cov.vault carrying >= required of the buy asset, tagged with the SAME PaymentDatum{spent order ref} as the owner/fee outputs. NOT a treasury_donation (Conway key 22 only reaches the chain treasury).",
+      "located": "value_paid_to_with_datum(tx, vault, payment_datum) requires EXACTLY ONE output to vault with that datum (zero or many -> deny). The vault MUST be distinct — ENFORCED on-chain by is_vault_distinct: vault.payment_credential != owner.payment_credential AND vault != fee_address (the owner check is on the PAYMENT CREDENTIAL only, so a shared payment cred collides even if the stake part differs). A filler that routes the premium to owner/fee builds a doomed tx; computeFillPlanV3 surfaces the error before build.",
+      "carryForward": "the relist must carry the WHOLE coverage forward UNCHANGED (is_correct_coverage) — a filler cannot strip coverage, redirect the premium, or lower the floor.",
+      "treasuryDonationInert": "swap() never reads treasury_donation, so key 22 is inert for both covered and uncovered orders; it is never the premium mechanism."
+    },
+    "redeemer": "SwapAction / CancelAction are BYTE-IDENTICAL to V2 (see redeemer). Only the datum + script_data_hash differ.",
+    "scriptDataHash": {
+      "handRolledRecipe": "same as scriptDataHash.handRolledRecipe BUT language_views = { 2 : <BARE PlutusV3 cost-model array> } (key 2 = PlutusV3), NOT the V2 key 1. Using the V2 key-1 recipe on a V3 order is rejected (PPViewHashesDontMatch). Standard builders compute key 11 automatically from the PlutusV3 cost model.",
+      "languageViews": {"key": 2, "value": "PlutusV3 cost-model integer array (bare, not tag-24-wrapped)"}
+    },
+    "fillReceipt": {
+      "optional": true,
+      "note": "CIP-69 mint handler on the SAME script (receipt policy id == swap script hash). The spend handler does NOT require it; the filler mints it by default (mintReceipt: false opts out). The mint handler binds the receipt to a REAL fill: it fails on a cancel-mint, a receipt riding an unrelated spend, or a forged price.",
+      "binding": "(1) the order input must be spent with a SwapAction (bound via Spend(order_ref) in tx.redeemers) — a CancelAction or absent redeemer fails; (2) the SwapAction's output_index must == the receipt's owner_output_index; (3) the maker payout at that index is bound by address == owner AND InlineDatum(PaymentDatum{order_ref}), and bought_amount is read there; (4) sold_amount is DERIVED on-chain (full fill = amount_sell; partial = script_input_sell − continuation_sell) and compared, not asserted; (5) bought_amount > 0 and sold_amount > 0.",
+      "assetName": "FILLER-CHOSEN: the handler requires exactly ONE token of quantity 1 under the policy but does NOT constrain the name (it binds the datum). This filler uses the UTF-8 bytes of \"SaturnFillReceipt\" (53617475726e46696c6c52656365697074).",
+      "redeemer": {"MintFillReceipt": {"constrAlternative": 0, "fields": ["order_input_index: Int", "owner_output_index: Int", "receipt_output_index: Int"]}, "BurnFillReceipt": {"constrAlternative": 1}},
+      "datum": "FillReceiptDatum{ maker: Address, order_reference: OutputReference(FLAT), sold_amount: Int, bought_amount: Int, policy_id_sell, asset_name_sell, policy_id_buy, asset_name_buy, executed_at: Int }",
+      "executedAt": "the tx's finite lower validity bound — POSIXTime in MILLISECONDS (not a slot). The filler snaps the desired validFrom to its slot boundary so executed_at == the POSIXTime the ledger derives from invalid_before.",
+      "meaning": "oracle-free proof of a real on-chain fill. NOTE: for an ADA-BUY fill bought_amount INCLUDES the maker's returned script min-UTxO deposit, so the raw bought_amount/sold_amount OVERSTATES the price — the true price is (bought_amount − script_input_deposit_lovelace)/sold_amount, and the AUTHORITATIVE rate is the datum's amount_buy/amount_sell (the maker's limit), not the raw receipt ratio. For a token-buy fill the returned ADA is a separate output, so the ratio is exact.",
+      "parkedLovelace": "mintReceipt defaults true and parks ~1.2-1.7 ADA (reclaimable by later spending the receipt UTxO — surfaced as receiptLovelace in the fill result) plus a marginal minting fee per fill; high-volume fillers that will not use the receipts should pass mintReceipt: false."
+    },
+    "onChainProven": {
+      "network": "mainnet",
+      "appliedHash": "6023f59dce0064f1d6d27594dbea25bc4305a9f6a10f3a064037553a (LIVE mainnet V3; order address addr1z9sz8ava…, ref de19f6a9…#0).",
+      "createOrders": "b6bcaeb6… (create V3 orders on mainnet)",
+      "fillWithReceipt": "bda03d56… (order spent with SwapAction; owner paid PaymentDatum-tagged; a fill-receipt mints under the swap policy id bound to the real fill — sold derived, bought = owner payout, executed_at = ledger POSIXTime)",
+      "insuredCoveredFill": "fe17fb88… (covered fill + premium output paid to the distinct Aegis vault)",
+      "partialFillRelist": "ad182bcd… (partial fill; the relisted remainder carries min_partial_fill AND the full coverage forward)",
+      "cancel": "dfe44a63… (owner cancel)",
+      "lpAdd": "eee72c22… (LP add liquidity — emits orders)",
+      "lpWithdrawEmit": "18a01339… (LP withdraw / emit orders)"
     }
   },
   "relist": {

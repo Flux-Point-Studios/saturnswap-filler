@@ -19,11 +19,10 @@ import { FEE_ADDRESS } from "./contract.js";
 import { assertCollateralDisjoint, inputIndexOf, sortInputs } from "./sort.js";
 import { computeScriptDataHashFromParts, bytesToHex } from "./scriptDataHash.js";
 import { CborReader, hexToBytes, type CborValue } from "./cbor.js";
-import { minUtxoLovelace, type SizingAssets } from "./minUtxo.js";
+import { feeOutputAssets, ownerOutputAssets, relistContinuationAssets } from "./outputs.js";
 
 const ADA = "" as const;
 export const MAINNET_COINS_PER_UTXO_BYTE = 4310n; // live utxoCostPerByte; overridable per build
-const MINUTXO_SIZING_LOVELACE = 2_000_000n; // 4-byte-width placeholder coin for sizing token outputs
 
 /** Relist continuation (one per spent order, partial fill only — SPEC §8 / swap_split). */
 export interface RelistPlan {
@@ -135,56 +134,35 @@ export function computeFillPlan(
     ? null
     : swapSplitAmounts(order.sell.amount, order.buy.amount, userSellAmount, sellIsAda);
 
-  // ---- Owner-payment output (SPEC §7.5 / owner_value_has_correct_amount + §8 buffer) ----
-  const ownerOutputAssets: Assets = {};
-  if (buyIsAda) {
-    // owner receives ADA. Full fill of a non-ADA-sell order needs lovelace >= amount_buy +
-    // script lovelace; partial fill needs lovelace >= user_sell_amount (+ buffer, which is 0
-    // when sell is a token). is_token_amount_correct: owner lovelace >= user_sell_amount.
-    const required = isFullFill ? order.buy.amount + order.scriptValue.lovelace : userSellAmount + (split?.sellBuffer ?? 0n);
-    const min = minUtxoLovelace(
-      { addressBech32: ownerAddressBech32, assets: { lovelace: required }, inlineDatumHex: paymentDatumHex },
-      coinsPerUtxoByte,
-    );
-    ownerOutputAssets["lovelace"] = required > min ? required : min;
-  } else {
-    // owner receives the buy TOKEN (amount_buy on full, user_sell_amount on partial). The §8
-    // ADA-sell buffer (2 ADA) must land on the owner; otherwise just the output's min-utxo.
-    const u = unit(order.buy.policyId, order.buy.assetName);
-    const tokenAmt = isFullFill ? order.buy.amount : userSellAmount;
-    ownerOutputAssets[u] = tokenAmt;
-    const min = minUtxoLovelace(
-      { addressBech32: ownerAddressBech32, assets: { lovelace: MINUTXO_SIZING_LOVELACE, [u]: tokenAmt }, inlineDatumHex: paymentDatumHex },
-      coinsPerUtxoByte,
-    );
-    const buffer = split?.sellBuffer ?? 0n;
-    ownerOutputAssets["lovelace"] = buffer > min ? buffer : min;
-  }
+  const ownerAssets = ownerOutputAssets({
+    buyIsAda,
+    buyUnit: unit(order.buy.policyId, order.buy.assetName),
+    amountBuy: order.buy.amount,
+    isFullFill,
+    userSellAmount,
+    scriptLovelace: order.scriptValue.lovelace,
+    sellBuffer: split?.sellBuffer ?? 0n,
+    ownerAddressBech32,
+    paymentDatumHex,
+    coinsPerUtxoByte,
+  });
 
-  // ---- Fee output (SPEC §7.6): >= total_fee of the SELL asset, to fee_address, same datum ----
-  const feeOutputAssets: Assets = {};
-  if (sellIsAda) {
-    const min = minUtxoLovelace(
-      { addressBech32: FEE_ADDRESS, assets: { lovelace: MINUTXO_SIZING_LOVELACE }, inlineDatumHex: paymentDatumHex },
-      coinsPerUtxoByte,
-    );
-    feeOutputAssets["lovelace"] = totalFee > min ? totalFee : min;
-  } else {
-    const u = unit(order.sell.policyId, order.sell.assetName);
-    feeOutputAssets[u] = totalFee;
-    feeOutputAssets["lovelace"] = minUtxoLovelace(
-      { addressBech32: FEE_ADDRESS, assets: { lovelace: MINUTXO_SIZING_LOVELACE, [u]: totalFee }, inlineDatumHex: paymentDatumHex },
-      coinsPerUtxoByte,
-    );
-  }
+  const feeAssets = feeOutputAssets({
+    sellIsAda,
+    sellUnit: unit(order.sell.policyId, order.sell.assetName),
+    totalFee,
+    feeAddress: FEE_ADDRESS,
+    paymentDatumHex,
+    coinsPerUtxoByte,
+  });
 
   const plan: FillPlan = {
     isFullFill,
     userSellAmount,
     newSwapAmountSell,
     totalFee,
-    ownerOutputAssets,
-    feeOutputAssets,
+    ownerOutputAssets: ownerAssets,
+    feeOutputAssets: feeAssets,
     paymentDatumHex,
     ownerAddressBech32,
   };
@@ -214,27 +192,15 @@ function buildRelist(
     }),
   );
 
-  const assets: Assets = {};
-  if (sellIsAda) {
-    // value_has_only_lovelace: ADA only. new_value_amount_sell(lovelace) >= corrected_new_amount_sell,
-    // and the output must also clear the ledger min-utxo (a near-fully-filled order can leave a
-    // remainder below ~1 ADA after the 2-ADA buffer).
-    const min = minUtxoLovelace(
-      { addressBech32: order.orderAddress, assets: { lovelace: split.correctedNewAmountSell || MINUTXO_SIZING_LOVELACE }, inlineDatumHex: datumHex },
-      coinsPerUtxoByte,
-    );
-    assets["lovelace"] = split.correctedNewAmountSell > min ? split.correctedNewAmountSell : min;
-  } else {
-    // value_has_asset_and_lovelace: [ada, sellToken]. min_utxo_goes_back_to_script:
-    // continuation lovelace >= the spent script UTxO's lovelace.
-    const u = unit(order.sell.policyId, order.sell.assetName);
-    assets[u] = split.correctedNewAmountSell;
-    const min = minUtxoLovelace(
-      { addressBech32: order.orderAddress, assets: { lovelace: MINUTXO_SIZING_LOVELACE, [u]: split.correctedNewAmountSell }, inlineDatumHex: datumHex },
-      coinsPerUtxoByte,
-    );
-    assets["lovelace"] = order.scriptValue.lovelace > min ? order.scriptValue.lovelace : min;
-  }
+  const assets = relistContinuationAssets({
+    sellIsAda,
+    sellUnit: unit(order.sell.policyId, order.sell.assetName),
+    correctedNewAmountSell: split.correctedNewAmountSell,
+    scriptLovelace: order.scriptValue.lovelace,
+    orderAddress: order.orderAddress,
+    datumHex,
+    coinsPerUtxoByte,
+  });
 
   return {
     scriptAddress: order.orderAddress,

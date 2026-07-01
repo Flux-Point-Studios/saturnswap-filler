@@ -15,10 +15,15 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import {
   DEPLOYMENTS,
+  MAINNET_DEPLOYMENTS,
+  PREPROD_DEPLOYMENTS,
   deploymentByScriptHash,
   deploymentByOrderAddress,
   FEE_ADDRESS,
   LEGACY_FEE_PERCENT_X100,
+  V3_SCRIPT_HASH_MAINNET,
+  V3_SCRIPT_HASH_PREPROD,
+  V3_REF_SCRIPT_MAINNET,
 } from "../../src/contract.js";
 import {
   koiosRowToRawUtxo,
@@ -62,9 +67,11 @@ function tokenSellOrder(feePercentX100: number, version: Order["version"], scrip
     utxo: { txHash: txByte.repeat(32), outputIndex: 0 },
     orderAddress: addr,
     version,
+    plutusVersion: "v2",
     scriptHash,
     refScript: { txHash: ref, outputIndex: 0 },
     feePercentX100,
+    feeAddress: FEE_ADDRESS,
     datum: {
       owner: OWNER,
       ownerRaw: { kind: "constr", alt: 0, fields: [] },
@@ -82,6 +89,8 @@ function tokenSellOrder(feePercentX100: number, version: Order["version"], scrip
     buy: { policyId: "", assetName: "", amount: 300_000_000n },
     priceBaseUnits: 100_000_000 / 300_000_000,
     validBeforeTime: null,
+    minPartialFill: 0n,
+    coverage: null,
   };
 }
 
@@ -111,8 +120,8 @@ describe("4% fee math (calculate_fee with fee_percent_x100 = 400, rounds DOWN)",
 });
 
 describe("per-order deployment resolution knows BOTH versions", () => {
-  it("DEPLOYMENTS carries the 1% and the 4% deployment", () => {
-    expect(DEPLOYMENTS.map((d) => d.version).sort()).toEqual(["1pct", "4pct"]);
+  it("DEPLOYMENTS carries the 1%, 4%, and V3 deployments", () => {
+    expect(DEPLOYMENTS.map((d) => d.version).sort()).toEqual(["1pct", "4pct", "v3"]);
   });
 
   it("deploymentByScriptHash(1af84a9e…) -> 4pct, fee 400, ref 86cdaeed…#0", () => {
@@ -134,6 +143,26 @@ describe("per-order deployment resolution knows BOTH versions", () => {
     expect(FEE_ADDRESS).toBe(
       "addr1q8x4rlqhrq4rhqhnkamw3fdqmzqgum79yragg4gptcjpphmrc2rpt0exfch4s47fu32amr45vh9wg053hmcx9k7kkcrq6kxftd",
     );
+  });
+
+  it("deploymentByScriptHash(6023f59d…) -> the LIVE mainnet V3 (fee_percent 100, mainnet fee_address, ref de19f6a9…#0)", () => {
+    const d = deploymentByScriptHash(V3_SCRIPT_HASH_MAINNET)!;
+    expect(d.version).toBe("v3");
+    expect(d.plutusVersion).toBe("v3");
+    expect(d.network).toBe("mainnet");
+    expect(d.feePercentX100).toBe(100);
+    expect(d.feeAddress).toBe(FEE_ADDRESS); // mainnet V3 bakes the SAME production fee_address
+    expect(d.refScript).toEqual(V3_REF_SCRIPT_MAINNET);
+    // it is the one carried in the production discovery registry
+    expect(MAINNET_DEPLOYMENTS).toContain(d);
+    expect(DEPLOYMENTS).toContain(d);
+  });
+
+  it("the preprod V3 (ec457591…) stays resolvable but is NOT in the production registry", () => {
+    const d = deploymentByScriptHash(V3_SCRIPT_HASH_PREPROD)!;
+    expect(d.network).toBe("preprod");
+    expect(PREPROD_DEPLOYMENTS).toContain(d);
+    expect(DEPLOYMENTS).not.toContain(d); // production discovery never scans preprod
   });
 });
 
