@@ -3,14 +3,16 @@
 // All amounts base units; pure (no chain/lucid provider needed).
 
 import { describe, it, expect } from "vitest";
-import { computeFillPlanV3 } from "../../src/fillV3.js";
-import { decodeSwapDatumV3Hex, type Coverage } from "../../src/datumV3.js";
+import { computeFillPlanV3, computeFillReceipt } from "../../src/fillV3.js";
+import { decodeFillReceiptDatum, decodeSwapDatumV3Hex, type Coverage } from "../../src/datumV3.js";
+import { hexToBytes } from "../../src/cbor.js";
 import { unit, type Order } from "../../src/discovery.js";
-import { V3_FEE_ADDRESS_PREPROD } from "../../src/contract.js";
+import { V3_FEE_ADDRESS_PREPROD, V3_FEE_PAYMENT_CRED_PREPROD } from "../../src/contract.js";
 
-const V3_ADDR = "addr_test1wqr2arhy80hmudh64zkj89pn5sgjq8wtux8kwgdkpjfhnwczwmwqk";
-const V3_HASH = "06ae8ee43befbe36faa8ad239433a411201dcbe18f6721b60c9379bb";
-const V3_REF = "8523aaaf17eb302905bf16dc9b8a53f920bd8a9771e6eb374ce1fc18cf5b50a0";
+// Hardened V3 (ec457591…, supersedes 06ae8ee4…): receipt-forgery + premium under-collection fixed.
+const V3_ADDR = "addr_test1wrky2av35n66krg8q9r9trjlzu5le3wqkgcywfphhcehvfg03jugc";
+const V3_HASH = "ec457591a4f5ab0d070146558e5f1729fcc5c0b230472437be337625";
+const V3_REF = "efb2c0dc789d9bdf0f3988c01c2ca24fe43f16706086252d7576a6a0ad25fa7e";
 const VAULT_HASH = "f57e8c62095c26e3b69ec5b809ea1014a11aa06b396a5a40235e6465";
 const POLICY_REF = { txHash: "ce456261980c9d1c20ec74231080093ea2c65ed928dd7533e41b93a75bef5703", outputIndex: 0 };
 const TOKEN = "0ff71ae2bdba25bb5e1805983c8e7924edfc77f808f4f8f6cc421ce4";
@@ -182,5 +184,100 @@ describe("computeFillPlanV3 — guards", () => {
       coverage: { vault: OWNER, vaultRaw: { kind: "constr", alt: 0, fields: [] }, premiumBps: 100n, policyRef: POLICY_REF },
     });
     expect(() => computeFillPlanV3(bad, bad.buy.amount)).toThrow(/distinct/);
+  });
+
+  it("rejects a coverage vault that collides with the fee address", () => {
+    const bad = v3Order({
+      txByte: "e5",
+      sell: { policyId: TOKEN, assetName: NAME, amount: 100_000_000n },
+      buy: { policyId: "", assetName: "", amount: 300_000_000n },
+      scriptLovelace: 2_047_250n,
+      minPartialFill: 0n,
+      coverage: {
+        vault: { payment: { type: "key", hash: V3_FEE_PAYMENT_CRED_PREPROD } },
+        vaultRaw: { kind: "constr", alt: 0, fields: [] },
+        premiumBps: 100n,
+        policyRef: POLICY_REF,
+      },
+    });
+    expect(() => computeFillPlanV3(bad, bad.buy.amount)).toThrow(/distinct/);
+  });
+});
+
+describe("computeFillPlanV3 — premium ≥1 floor (V3 #6, red-team fix B)", () => {
+  it("a covered order with premium_bps=0 STILL owes a floored premium of 1", () => {
+    const zeroBps = v3Order({
+      txByte: "f6",
+      sell: { policyId: TOKEN, assetName: NAME, amount: 100_000_000n },
+      buy: { policyId: "", assetName: "", amount: 300_000_000n },
+      scriptLovelace: 2_047_250n,
+      minPartialFill: 0n,
+      coverage: coverage(0n),
+    });
+    const p = computeFillPlanV3(zeroBps, zeroBps.buy.amount);
+    // the on-chain floor is required = max(1, filled_buy * premium_bps / 10000) = max(1, 0) = 1
+    expect(p.premium).toBeDefined();
+    expect(p.premium!.required).toBe(1n);
+    // buy=ADA: the output still clears min-utxo, well above the 1-lovelace requirement
+    expect(p.premium!.assets["lovelace"]).toBeGreaterThan(1n);
+  });
+
+  it("a covered fill whose raw premium rounds DOWN to 0 is floored to 1", () => {
+    // buy=TOKEN, premium 1 bps: a 5000-unit fill => 5000*1/10000 = 0 (rounds down) => floored to 1.
+    const tinyBps = v3Order({
+      txByte: "17",
+      sell: { policyId: "", assetName: "", amount: 100_000_000n },
+      buy: { policyId: TOKEN, assetName: NAME, amount: 50_000_000n },
+      scriptLovelace: 102_000_000n,
+      minPartialFill: 0n,
+      coverage: coverage(1n),
+    });
+    const p = computeFillPlanV3(tinyBps, 5_000n);
+    expect(p.premium!.required).toBe(1n);
+    expect(p.premium!.assets[unit(TOKEN, NAME)]).toBe(1n);
+  });
+});
+
+describe("computeFillReceipt — the fill-receipt binding (V3 #5, red-team fix A)", () => {
+  it("full fill: sold = amount_sell, bought = the buy delivered to the owner output", () => {
+    const plan = computeFillPlanV3(coveredAdaBuy, coveredAdaBuy.buy.amount);
+    const r = computeFillReceipt(coveredAdaBuy, plan, coveredAdaBuy.sell.amount, 1_700_000_000_000n);
+    expect(r.soldAmount).toBe(100_000_000n); // == order_datum.amount_sell
+    // buy=ADA full fill: owner lovelace = amount_buy + script lovelace
+    expect(r.boughtAmount).toBe(300_000_000n + 2_047_250n);
+    expect(r.datum.maker).toEqual(OWNER);
+    expect(r.datum.orderReference).toEqual(coveredAdaBuy.utxo);
+    expect(r.datum.policyIdSell).toBe(TOKEN);
+    expect(r.datum.policyIdBuy).toBe("");
+    expect(r.datum.executedAt).toBe(1_700_000_000_000n);
+    // datumHex round-trips through the codec
+    expect(decodeFillReceiptDatum(hexToBytes(r.datumHex))).toEqual(r.datum);
+  });
+
+  it("partial fill: sold = script_input_sell − continuation_sell (ADA-sell)", () => {
+    const plan = computeFillPlanV3(coveredTokenBuy, 25_000_000n);
+    // sell is ADA; the spent order UTxO carries scriptLovelace on-chain
+    const scriptInputSell = coveredTokenBuy.scriptValue.lovelace;
+    const r = computeFillReceipt(coveredTokenBuy, plan, scriptInputSell, 1_700_000_000_000n);
+    const continuationSell = plan.relist!.assets["lovelace"] ?? 0n;
+    expect(r.soldAmount).toBe(scriptInputSell - continuationSell);
+    // buy=TOKEN partial: owner receives user_sell_amount of the buy token
+    expect(r.boughtAmount).toBe(25_000_000n);
+    expect(r.datum.orderReference).toEqual(coveredTokenBuy.utxo);
+  });
+
+  it("an uncovered order still mints a receipt (the receipt is coverage-independent)", () => {
+    const plan = computeFillPlanV3(coveredTokenBuy, 25_000_000n);
+    const uncoveredPlan = computeFillPlanV3(uncovered, 25_000_000n);
+    const rCov = computeFillReceipt(coveredTokenBuy, plan, coveredTokenBuy.scriptValue.lovelace, 1n);
+    const rUnc = computeFillReceipt(uncovered, uncoveredPlan, uncovered.scriptValue.lovelace, 1n);
+    expect(rUnc.soldAmount).toBe(rCov.soldAmount);
+    expect(rUnc.boughtAmount).toBe(rCov.boughtAmount);
+  });
+
+  it("rejects a V2 order", () => {
+    const plan = computeFillPlanV3(uncovered, 25_000_000n);
+    const v2ish = { ...uncovered, plutusVersion: "v2" as const };
+    expect(() => computeFillReceipt(v2ish, plan, uncovered.scriptValue.lovelace, 1n)).toThrow(/requires a V3 order/);
   });
 });

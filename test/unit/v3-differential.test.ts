@@ -14,9 +14,16 @@ import {
   coverageToPlutusData,
   outputRefV3ToPlutusData,
   paymentDatumV3,
+  fillReceiptDatumToPlutusData,
+  decodeFillReceiptDatum,
+  mintFillReceiptRedeemer,
+  burnFillReceiptRedeemer,
+  FILL_RECEIPT_ASSET_NAME,
+  type FillReceiptDatum,
 } from "../../src/datumV3.js";
 import { paymentDatum } from "../../src/datum.js";
 import { plutusToHex } from "../../src/plutus.js";
+import { hexToBytes } from "../../src/cbor.js";
 import {
   encodeLanguageViewsV2,
   encodeLanguageViewsV3,
@@ -159,5 +166,41 @@ describe("V3 redeemers are byte-identical to V2 (SwapAction / CancelAction uncha
   it("SwapAction / CancelAction encode the same as V2", () => {
     expect(plutusToHex(swapActionRedeemer(125_124_999_999n, 2, 0))).toBe("d8799f1b0000001d2207fb3f0200ff");
     expect(plutusToHex(cancelActionRedeemer(1))).toBe("d87a9f01ff");
+  });
+});
+
+describe("V3 fill-receipt wire form (hardened CIP-69 mint on the swap script; policy id == hash)", () => {
+  // [type] FillReceiptDatum = Constr0[ maker: Address, order_reference: OutputReference(FLAT),
+  //   sold_amount, bought_amount, policy_id_sell, asset_name_sell, policy_id_buy, asset_name_buy,
+  //   executed_at ] — 9 positional fields; order_reference uses the FLAT V3 OutputReference.
+  const receipt: FillReceiptDatum = {
+    maker: { payment: { type: "key", hash: "5fce592147c520b69d3a485b15447cb24fd59cba6d78f143616effc4" } },
+    orderReference: { txHash: "a1".repeat(32), outputIndex: 0 },
+    soldAmount: 100_000_000n,
+    boughtAmount: 302_047_250n,
+    policyIdSell: "0ff71ae2bdba25bb5e1805983c8e7924edfc77f808f4f8f6cc421ce4",
+    assetNameSell: "45445354",
+    policyIdBuy: "",
+    assetNameBuy: "",
+    executedAt: 1_700_000_000_000n,
+  };
+
+  it("FillReceiptDatum round-trips and carries a FLAT order_reference", () => {
+    const hex = plutusToHex(fillReceiptDatumToPlutusData(receipt));
+    expect(decodeFillReceiptDatum(hexToBytes(hex))).toEqual(receipt);
+    // FLAT OutputReference tag: Constr0[ bstr32(a1..a1), 0 ] — no nested TransactionId wrapper.
+    expect(hex).toContain("d8799f5820" + "a1".repeat(32) + "00ff");
+  });
+
+  it("MintFillReceipt(order_input_index, owner_output_index, receipt_output_index) = Constr0[int,int,int]", () => {
+    expect(plutusToHex(mintFillReceiptRedeemer(0, 0, 4))).toBe("d8799f000004ff");
+    expect(plutusToHex(mintFillReceiptRedeemer(2, 0, 5))).toBe("d8799f020005ff");
+    // BurnFillReceipt = Constr1[]
+    expect(plutusToHex(burnFillReceiptRedeemer())).toBe("d87a9fff");
+  });
+
+  it("the receipt token name is the UTF-8 bytes of \"SaturnFillReceipt\" (filler-chosen)", () => {
+    expect(FILL_RECEIPT_ASSET_NAME).toBe("53617475726e46696c6c52656365697074");
+    expect(Buffer.from(FILL_RECEIPT_ASSET_NAME, "hex").toString("utf8")).toBe("SaturnFillReceipt");
   });
 });

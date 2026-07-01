@@ -183,10 +183,15 @@ export function paymentDatumV3Bytes(spentOrder: OutputRef): Uint8Array {
   return plutusToBytes(paymentDatumV3(spentOrder));
 }
 
-// ---- Fill receipt (optional CIP-69 mint on the swap script; policy id == script hash) ----
+// ---- Fill receipt (CIP-69 mint on the swap script; policy id == script hash) ----
 // A filler MAY mint a self-validating fill-receipt alongside a fill. The swap `spend` handler
 // does NOT require it, so minting is optional; the codec is provided so aggregators can emit
 // and indexers can read the oracle-free executed-price receipt.
+//
+// The receipt token name is FILLER-CHOSEN: the mint handler requires exactly ONE token of
+// quantity 1 under the policy but does NOT constrain the name (it binds the DATUM, not the
+// name). We use the UTF-8 bytes of "SaturnFillReceipt".
+export const FILL_RECEIPT_ASSET_NAME = bytesToHex(new TextEncoder().encode("SaturnFillReceipt"));
 
 export interface FillReceiptDatum {
   maker: OwnerAddress;

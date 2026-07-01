@@ -1,9 +1,16 @@
 // Non-auth taker-fill for the V3 (PlutusV3) saturn_swap validator. Same recipe as the V2
-// fill (SPEC §7/§8) plus the two V3 conjuncts the validator enforces:
+// fill (SPEC §7/§8) plus the V3 conjuncts the validator enforces:
 //   - min_partial_fill (#4): a PARTIAL fill must take >= min_partial_fill of the buy asset.
 //   - coverage (#6): a COVERED order (coverage = Some) must emit a premium OUTPUT to the
-//     coverage vault carrying >= filled_buy * premium_bps / 10000 of the BUY asset, tagged
-//     with the same PaymentDatum. A fill that omits/underpays the premium is DENIED.
+//     coverage vault carrying >= max(1, filled_buy * premium_bps / 10000) of the BUY asset,
+//     tagged with the same PaymentDatum. The vault must be DISTINCT from owner (payment
+//     credential) and fee_address. A fill that omits/underpays the premium is DENIED.
+//   - fill-receipt (#5): the fill ALSO mints a CIP-69 self-validating fill-receipt on the swap
+//     script (receipt policy id == script hash). The hardened mint handler binds the receipt to
+//     a REAL SwapAction fill: the SwapAction payout-index == the receipt's owner_output_index,
+//     the maker payout carries InlineDatum(PaymentDatum{order_ref}), and sold_amount is DERIVED
+//     on-chain (full = amount_sell; partial = script_input_sell − continuation_sell). We build
+//     the receipt to match that binding exactly. (Minting is opt-out via mintReceipt: false.)
 // The partial-fill relist must carry min_partial_fill AND the full coverage forward unchanged.
 //
 // Load-bearing bytes (datum / redeemer / script_data_hash) come from this lib's own V3
@@ -11,21 +18,29 @@
 // use @lucid-evolution/lucid (CML). V3 lives on PREPROD (mainnet V3 pending).
 
 import type { LucidEvolution, UTxO, Assets, Network } from "@lucid-evolution/lucid";
-import { credentialToAddress } from "@lucid-evolution/lucid";
+import { credentialToAddress, slotToUnixTime } from "@lucid-evolution/lucid";
 import type { Order } from "./discovery.js";
 import { unit } from "./discovery.js";
 import type { OwnerAddress } from "./datum.js";
 import { swapActionRedeemer } from "./datum.js";
-import type { Coverage } from "./datumV3.js";
-import { paymentDatumV3, swapDatumV3ToPlutusData } from "./datumV3.js";
+import type { Coverage, FillReceiptDatum } from "./datumV3.js";
+import {
+  FILL_RECEIPT_ASSET_NAME,
+  fillReceiptDatumToPlutusData,
+  mintFillReceiptRedeemer,
+  paymentDatumV3,
+  swapDatumV3ToPlutusData,
+} from "./datumV3.js";
 import { fillSellAndFee, premiumForFill, swapSplitAmounts } from "./ratio.js";
 import { plutusToHex } from "./plutus.js";
 import {
   feeOutputAssets,
+  MINUTXO_SIZING_LOVELACE,
   ownerOutputAssets,
   premiumOutputAssets,
   relistContinuationAssets,
 } from "./outputs.js";
+import { minUtxoLovelace } from "./minUtxo.js";
 import type { RelistPlan, FillPlan } from "./fill.js";
 import { assertCollateralDisjoint, inputIndexOf, sortInputs } from "./sort.js";
 import { computeScriptDataHashV3FromParts, bytesToHex } from "./scriptDataHash.js";
@@ -142,27 +157,36 @@ export function computeFillPlanV3(
     coverage: order.coverage,
   };
 
-  // V3 #6: covered order ⇒ premium output to the coverage vault (buy asset). filled_buy = the
-  // buy asset delivered this fill = user_sell_amount.
+  // V3 #6: covered order ⇒ a premium output to the coverage vault (buy asset). filled_buy = the
+  // buy asset delivered this fill = user_sell_amount. The hardened validator enforces this for
+  // EVERY covered fill (there is no zero-premium escape): the vault must be distinct and the
+  // required premium is floored at 1.
   if (order.coverage) {
-    const required = premiumForFill(userSellAmount, order.coverage.premiumBps);
-    if (required > 0n) {
-      const vaultAddressBech32 = credAddr(network, order.coverage.vault);
-      if (vaultAddressBech32 === ownerAddressBech32 || vaultAddressBech32 === order.feeAddress)
-        throw new Error(
-          "coverage vault must be distinct from the owner and fee addresses — " +
-            "each carries the same PaymentDatum, so a shared address collides the double-satisfaction guard",
-        );
-      const assets = premiumOutputAssets({
-        buyIsAda,
-        buyUnit: unit(order.buy.policyId, order.buy.assetName),
-        required,
-        vaultAddressBech32,
-        paymentDatumHex,
-        coinsPerUtxoByte,
-      });
-      plan.premium = { vaultAddressBech32, required, assets };
-    }
+    const vaultAddressBech32 = credAddr(network, order.coverage.vault);
+    // is_vault_distinct: vault.payment_credential != owner.payment_credential AND vault != fee.
+    // The owner check is on the PAYMENT CREDENTIAL only (a shared payment cred collides even if
+    // the stake part differs), matching the on-chain check exactly.
+    const ownerPay = order.datum.owner.payment;
+    const vaultPay = order.coverage.vault.payment;
+    const collidesOwner = vaultPay.type === ownerPay.type && vaultPay.hash === ownerPay.hash;
+    if (collidesOwner || vaultAddressBech32 === order.feeAddress)
+      throw new Error(
+        "coverage vault must be distinct from the owner (payment credential) and the fee address — " +
+          "a shared destination collapses the double-satisfaction guard; the validator's is_vault_distinct denies it",
+      );
+    // ≥1 floor (on-chain required = max(1, filled_buy * premium_bps / 10000)): a covered fill
+    // can NEVER owe zero, so a premium output is ALWAYS emitted for a covered order.
+    const base = premiumForFill(userSellAmount, order.coverage.premiumBps);
+    const required = base > 1n ? base : 1n;
+    const assets = premiumOutputAssets({
+      buyIsAda,
+      buyUnit: unit(order.buy.policyId, order.buy.assetName),
+      required,
+      vaultAddressBech32,
+      paymentDatumHex,
+      coinsPerUtxoByte,
+    });
+    plan.premium = { vaultAddressBech32, required, assets };
   }
 
   if (split) plan.relist = buildRelistV3(order, split, sellIsAda, coinsPerUtxoByte);
@@ -213,6 +237,76 @@ function buildRelistV3(
   };
 }
 
+/** The fill-receipt the CIP-69 mint handler binds to (V3 #5). `sold`/`bought` are DERIVED exactly
+ *  as the hardened validator derives them, so the minted receipt validates:
+ *    - bought = the buy asset actually delivered to the owner output (index 0 in this builder)
+ *    - sold   = full fill: amount_sell; partial: script_input_sell − continuation_sell
+ *  `scriptInputSell` is the sell-asset quantity in the SPENT order UTxO's on-chain value;
+ *  `executedAtMs` is the tx's finite lower validity bound (POSIXTime ms) the receipt anchors to. */
+export interface ReceiptPlan {
+  /** filler-chosen receipt token name (hex); the mint handler binds the datum, not the name */
+  assetNameHex: string;
+  datum: FillReceiptDatum;
+  /** inline FillReceiptDatum carried on the receipt output */
+  datumHex: string;
+  soldAmount: bigint;
+  boughtAmount: bigint;
+}
+
+export function computeFillReceipt(
+  order: Order,
+  plan: FillPlanV3,
+  scriptInputSell: bigint,
+  executedAtMs: bigint,
+): ReceiptPlan {
+  if (order.plutusVersion !== "v3") throw new Error("computeFillReceipt requires a V3 order");
+  const sellIsAda = isAda(order.sell.policyId, order.sell.assetName);
+  const buyIsAda = isAda(order.buy.policyId, order.buy.assetName);
+  const sellUnit = unit(order.sell.policyId, order.sell.assetName);
+  const buyUnit = unit(order.buy.policyId, order.buy.assetName);
+
+  // bought = quantity_of(owner_output.value, buy) — the payout `swap` enforced at output_index 0.
+  const boughtAmount = buyIsAda
+    ? plan.ownerOutputAssets["lovelace"] ?? 0n
+    : plan.ownerOutputAssets[buyUnit] ?? 0n;
+
+  // sold = the actual sell-asset delta that left the script.
+  let soldAmount: bigint;
+  if (plan.isFullFill) {
+    soldAmount = order.sell.amount; // == order_datum.amount_sell
+  } else {
+    if (!plan.relist) throw new Error("partial fill without a relist continuation — cannot derive sold");
+    const continuationSell = sellIsAda
+      ? plan.relist.assets["lovelace"] ?? 0n
+      : plan.relist.assets[sellUnit] ?? 0n;
+    soldAmount = scriptInputSell - continuationSell;
+  }
+  if (soldAmount <= 0n || boughtAmount <= 0n)
+    throw new Error(
+      `fill-receipt would carry a non-positive amount (sold=${soldAmount}, bought=${boughtAmount}); ` +
+        "the validator requires sold_amount > 0 and bought_amount > 0",
+    );
+
+  const datum: FillReceiptDatum = {
+    maker: order.datum.owner,
+    orderReference: order.utxo,
+    soldAmount,
+    boughtAmount,
+    policyIdSell: order.sell.policyId,
+    assetNameSell: order.sell.assetName,
+    policyIdBuy: order.buy.policyId,
+    assetNameBuy: order.buy.assetName,
+    executedAt: executedAtMs,
+  };
+  return {
+    assetNameHex: FILL_RECEIPT_ASSET_NAME,
+    datum,
+    datumHex: plutusToHex(fillReceiptDatumToPlutusData(datum)),
+    soldAmount,
+    boughtAmount,
+  };
+}
+
 export interface BuildTakerFillV3Options {
   lucid: LucidEvolution;
   order: Order;
@@ -224,6 +318,11 @@ export interface BuildTakerFillV3Options {
   /** override the PlutusV3 cost model used for the self-computed SDH cross-check */
   costModelV3?: bigint[];
   coinsPerUtxoByte?: bigint;
+  /** mint a CIP-69 fill-receipt alongside the fill (default true); false skips the receipt */
+  mintReceipt?: boolean;
+  /** desired lower validity bound (POSIX ms) the receipt's executed_at anchors to; defaults to
+   *  ~60s in the past so the tx is immediately valid. Snapped to the slot boundary. */
+  validFromUnixMs?: number;
 }
 
 export interface TakerFillV3Result {
@@ -237,6 +336,18 @@ export interface TakerFillV3Result {
   txScriptDataHash: string;
   scriptDataHashMatches: boolean;
   plan: FillPlanV3;
+  /** the minted fill-receipt (undefined when mintReceipt is false) */
+  receipt?: {
+    /** author-order index of the receipt output = the redeemer's receipt_output_index */
+    outputIndex: number;
+    /** receipt asset unit (policy id == swap script hash) ‖ asset name hex */
+    unit: string;
+    datum: FillReceiptDatum;
+    /** the tx's finite lower validity bound (POSIX ms) the receipt anchors to */
+    executedAt: bigint;
+    soldAmount: bigint;
+    boughtAmount: bigint;
+  };
 }
 
 export async function buildTakerFillV3(opts: BuildTakerFillV3Options): Promise<TakerFillV3Result> {
@@ -298,6 +409,56 @@ export async function buildTakerFillV3(opts: BuildTakerFillV3Options): Promise<T
     );
   }
 
+  // V3 #5: mint a CIP-69 fill-receipt bound to this fill. The receipt output is LAST in author
+  // order; its index is the mint redeemer's receipt_output_index. The mint reads `bought` off
+  // the owner output (index 0 = the SwapAction output_index) and derives `sold` from the sell
+  // delta, so the receipt datum must match computeFillReceipt exactly. The multi-purpose swap
+  // script (spend + mint under the same hash) is resolved from the reference script read above.
+  let receiptResult: TakerFillV3Result["receipt"];
+  const mintReceipt = opts.mintReceipt ?? true;
+  if (mintReceipt) {
+    // Snap the desired lower bound to its slot boundary so executed_at == the POSIXTime the
+    // ledger derives from invalid_before (round-trips through unixTimeToSlot ⇄ slotToUnixTime).
+    const validFromMs = opts.validFromUnixMs ?? Date.now() - 60_000;
+    const slot = lucid.unixTimeToSlot(validFromMs);
+    const executedAt = BigInt(slotToUnixTime(network, slot));
+
+    const sellIsAda = isAda(order.sell.policyId, order.sell.assetName);
+    const scriptInputSell = sellIsAda
+      ? orderUtxo.assets["lovelace"] ?? 0n
+      : orderUtxo.assets[unit(order.sell.policyId, order.sell.assetName)] ?? 0n;
+    const receipt = computeFillReceipt(order, plan, scriptInputSell, executedAt);
+    const receiptUnit = order.scriptHash + receipt.assetNameHex;
+    const receiptOutputIndex = 2 + (plan.premium ? 1 : 0) + (plan.relist ? 1 : 0);
+
+    const receiptLovelace = minUtxoLovelace(
+      {
+        addressBech32: changeAddress,
+        assets: { lovelace: MINUTXO_SIZING_LOVELACE, [receiptUnit]: 1n },
+        inlineDatumHex: receipt.datumHex,
+      },
+      coinsPerUtxoByte,
+    );
+    const receiptAssets: Assets = { [receiptUnit]: 1n, lovelace: receiptLovelace };
+
+    tx = tx
+      .pay.ToAddressWithData(changeAddress, { kind: "inline", value: receipt.datumHex }, receiptAssets)
+      .mintAssets(
+        { [receiptUnit]: 1n },
+        plutusToHex(mintFillReceiptRedeemer(inputIndex, outputIndex, receiptOutputIndex)),
+      )
+      .validFrom(Number(executedAt));
+
+    receiptResult = {
+      outputIndex: receiptOutputIndex,
+      unit: receiptUnit,
+      datum: receipt.datum,
+      executedAt,
+      soldAmount: receipt.soldAmount,
+      boughtAmount: receipt.boughtAmount,
+    };
+  }
+
   if (order.validBeforeTime !== null) {
     tx = tx.validTo(Number(order.validBeforeTime) - 1);
   }
@@ -327,6 +488,7 @@ export async function buildTakerFillV3(opts: BuildTakerFillV3Options): Promise<T
     txScriptDataHash: txSdh,
     scriptDataHashMatches: selfSdh === txSdh,
     plan,
+    receipt: receiptResult,
   };
 }
 

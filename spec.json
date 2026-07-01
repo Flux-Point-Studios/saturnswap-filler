@@ -50,15 +50,15 @@
       "label": "v3",
       "feePercent": 1,
       "feePercentX100": 100,
-      "scriptHash": "06ae8ee43befbe36faa8ad239433a411201dcbe18f6721b60c9379bb",
-      "scriptAddress": "addr_test1wqr2arhy80hmudh64zkj89pn5sgjq8wtux8kwgdkpjfhnwczwmwqk",
+      "scriptHash": "ec457591a4f5ab0d070146558e5f1729fcc5c0b230472437be337625",
+      "scriptAddress": "addr_test1wrky2av35n66krg8q9r9trjlzu5le3wqkgcywfphhcehvfg03jugc",
       "addressHeaderByte": "0x70",
-      "refScriptUtxo": "8523aaaf17eb302905bf16dc9b8a53f920bd8a9771e6eb374ce1fc18cf5b50a0#0",
+      "refScriptUtxo": "efb2c0dc789d9bdf0f3988c01c2ca24fe43f16706086252d7576a6a0ad25fa7e#0",
       "feeAddress": "addr_test1vrjau4npl8vg8fvp38ahj3lxu3wtlp3qyh2agu4u6vqxlds065ldr",
       "plutusVersion": "v3",
       "network": "preprod",
       "status": "active",
-      "note": "V3 (PlutusV3), PREPROD (mainnet V3 pending). Enterprise script address (type-7, no stake). DISTINCT wire format from V2 (see the v3 object): 11-field SwapDatum (adds min_partial_fill + optional Aegis coverage), FLAT OutputReference (Constr0[bstr32, ix], used in SwapDatum.output_reference, Coverage.policy_ref, AND PaymentDatum), and script_data_hash language-views key 2 (NOT the V2 key 1). Fee is still 1% in the sell asset to the baked fee_address; that fee_address is the preprod deployment's (a mainnet V3 will bake a production one). A COVERED order additionally requires a per-fill premium output to coverage.vault or the validator denies."
+      "note": "V3 (PlutusV3), PREPROD (mainnet V3 pending). HARDENED build ec457591… (supersedes 06ae8ee4…: receipt-forgery + premium under-collection fixes). Enterprise script address (type-7, no stake). DISTINCT wire format from V2 (see the v3 object): 11-field SwapDatum (adds min_partial_fill + optional Aegis coverage), FLAT OutputReference (Constr0[bstr32, ix], used in SwapDatum.output_reference, Coverage.policy_ref, AND PaymentDatum), and script_data_hash language-views key 2 (NOT the V2 key 1). Fee is still 1% in the sell asset to the baked fee_address; that fee_address is the preprod deployment's (a mainnet V3 will bake a production one). A COVERED order additionally requires a per-fill premium output to a vault distinct from owner/fee (floored at 1 unit) or the validator denies."
     }
   ],
   "optional4pctRunoff": {
@@ -210,10 +210,10 @@
   "v3": {
     "network": "preprod",
     "plutusVersion": "v3",
-    "status": "PROVEN on preprod; mainnet V3 pending",
-    "scriptHash": "06ae8ee43befbe36faa8ad239433a411201dcbe18f6721b60c9379bb",
-    "scriptAddress": "addr_test1wqr2arhy80hmudh64zkj89pn5sgjq8wtux8kwgdkpjfhnwczwmwqk",
-    "refScriptUtxo": "8523aaaf17eb302905bf16dc9b8a53f920bd8a9771e6eb374ce1fc18cf5b50a0#0",
+    "status": "HARDENED (ec457591…, red-team fixes A+B) and PROVEN on preprod; mainnet V3 pending",
+    "scriptHash": "ec457591a4f5ab0d070146558e5f1729fcc5c0b230472437be337625",
+    "scriptAddress": "addr_test1wrky2av35n66krg8q9r9trjlzu5le3wqkgcywfphhcehvfg03jugc",
+    "refScriptUtxo": "efb2c0dc789d9bdf0f3988c01c2ca24fe43f16706086252d7576a6a0ad25fa7e#0",
     "feePercentX100": 100,
     "feeAddress": "addr_test1vrjau4npl8vg8fvp38ahj3lxu3wtlp3qyh2agu4u6vqxlds065ldr",
     "outputReference": {
@@ -247,11 +247,10 @@
       "carryForward": "the partial-fill relist must carry min_partial_fill forward UNCHANGED (is_correct_min_partial_fill)."
     },
     "premium": {
-      "appliesWhen": "coverage = Some(cov)",
-      "formula": "required = user_sell_amount * cov.premium_bps / 10000 (integer division, rounds DOWN), denominated in the BUY asset",
+      "appliesWhen": "coverage = Some(cov) — for EVERY covered fill, regardless of premium_bps",
+      "formula": "required = max(1, user_sell_amount * cov.premium_bps / 10000) — the base rounds DOWN, then the hardened validator floors it at 1 unit of the BUY asset so a covered fill can NEVER owe zero (red-team fix B).",
       "output": "a normal tx OUTPUT to cov.vault carrying >= required of the buy asset, tagged with the SAME PaymentDatum{spent order ref} as the owner/fee outputs. NOT a treasury_donation (Conway key 22 only reaches the chain treasury).",
-      "located": "value_paid_to_with_datum(tx, vault, payment_datum) requires EXACTLY ONE output to vault with that datum (zero or many -> deny), so the vault MUST be distinct from the owner and fee addresses.",
-      "zeroPremium": "required <= 0 -> no premium output needed",
+      "located": "value_paid_to_with_datum(tx, vault, payment_datum) requires EXACTLY ONE output to vault with that datum (zero or many -> deny). The vault MUST be distinct — ENFORCED on-chain by is_vault_distinct: vault.payment_credential != owner.payment_credential AND vault != fee_address (the owner check is on the PAYMENT CREDENTIAL only, so a shared payment cred collides even if the stake part differs). A filler that routes the premium to owner/fee builds a doomed tx; computeFillPlanV3 surfaces the error before build.",
       "carryForward": "the relist must carry the WHOLE coverage forward UNCHANGED (is_correct_coverage) — a filler cannot strip coverage, redirect the premium, or lower the floor.",
       "treasuryDonationInert": "swap() never reads treasury_donation, so key 22 is inert for both covered and uncovered orders; it is never the premium mechanism."
     },
@@ -262,17 +261,22 @@
     },
     "fillReceipt": {
       "optional": true,
-      "note": "CIP-69 mint handler on the SAME script (receipt policy id == swap script hash). The spend handler does NOT require it; a filler MAY mint a self-validating fill-receipt alongside a fill.",
+      "note": "CIP-69 mint handler on the SAME script (receipt policy id == swap script hash). The spend handler does NOT require it; the filler mints it by default (mintReceipt: false opts out). The HARDENED mint handler binds the receipt to a REAL fill (red-team fix A): it fails on a cancel-mint, a receipt riding an unrelated spend, or a forged price.",
+      "binding": "(1) the order input must be spent with a SwapAction (bound via Spend(order_ref) in tx.redeemers) — a CancelAction or absent redeemer fails; (2) the SwapAction's output_index must == the receipt's owner_output_index; (3) the maker payout at that index is bound by address == owner AND InlineDatum(PaymentDatum{order_ref}), and bought_amount is read there; (4) sold_amount is DERIVED on-chain (full fill = amount_sell; partial = script_input_sell − continuation_sell) and compared, not asserted; (5) bought_amount > 0 and sold_amount > 0.",
+      "assetName": "FILLER-CHOSEN: the handler requires exactly ONE token of quantity 1 under the policy but does NOT constrain the name (it binds the datum). This filler uses the UTF-8 bytes of \"SaturnFillReceipt\" (53617475726e46696c6c52656365697074).",
       "redeemer": {"MintFillReceipt": {"constrAlternative": 0, "fields": ["order_input_index: Int", "owner_output_index: Int", "receipt_output_index: Int"]}, "BurnFillReceipt": {"constrAlternative": 1}},
       "datum": "FillReceiptDatum{ maker: Address, order_reference: OutputReference(FLAT), sold_amount: Int, bought_amount: Int, policy_id_sell, asset_name_sell, policy_id_buy, asset_name_buy, executed_at: Int }",
-      "executedAt": "the tx's finite lower validity bound — POSIXTime in MILLISECONDS (not a slot)",
+      "executedAt": "the tx's finite lower validity bound — POSIXTime in MILLISECONDS (not a slot). The filler snaps the desired validFrom to its slot boundary so executed_at == the POSIXTime the ledger derives from invalid_before.",
       "meaning": "oracle-free proof of a real on-chain fill at price = bought_amount / sold_amount"
     },
     "onChainProven": {
-      "createOrder": "477e2997326bc455ab10d20f373d2e7aed5013272e6e1861b50ee06c7f8e28b4 (4 orders rest at the V3 address: covered, uncovered, covered+floor, uncovered)",
-      "atomicInsuredSwap": "c458c09f0985b62f7ed20afc307acc1b183b29c675b92b5e34ab3ce1708d10cf (covered full fill + premium output to the Aegis vault + a Conway key-22 donation, single signature)",
-      "uncoveredFillWithReceipt": "d5c1ef1ef0242911ffd7f8f4e8d967ee5978a29c1600481d759c7fce716987dc (uncovered fill validates with a key-22 donation present; a fill-receipt mints under the swap-script-hash policy)",
-      "partialFillRelist": "a0510ef7b9af721a3bb378b4a18ecf892f6f4c7464c424af8f3d8ca8f89b4c97 (the relisted remainder carries min_partial_fill AND the full coverage forward, verified on-chain)",
+      "appliedHash": "ec457591a4f5ab0d070146558e5f1729fcc5c0b230472437be337625 (HARDENED; supersedes 06ae8ee4…). Unapplied template hash 2fbed7afd827578d9ad13ef49e86a003f94b7b986671013e80468cbc.",
+      "createHardenedOrders": "39c84bbc11d34dbe799df8878f89a66ff6aa1c87fcc3b0d56d659993d5254149 (4 orders at the hardened swap addr: #0 uncovered, #1 covered, #2 covered-vault==owner, #3 uncovered)",
+      "honestFillWithReceipt": "77ccbaefcaa7741d1c684c1a7870f4108af8aeb06072e65af09c4350cbb99373 (order #0 spent with SwapAction; owner paid PaymentDatum-tagged; a fill-receipt mints under ec457591… bound to the real fill — sold derived, bought = owner payout, executed_at = ledger POSIXTime)",
+      "honestCoveredFill": "3f6e5970824f10f2714162e0d8a4524da1070ff1ab54a622537b8cde3be198e2 (order #1 filled; 1% premium paid to the distinct Aegis vault, PaymentDatum-tagged)",
+      "attackCancelMintRejected": "order #3 spent with CancelAction while minting a receipt is REJECTED on-chain (minting script failure on ec457591 — no SwapAction to bind)",
+      "attackVaultIsOwnerRejected": "order #2 (coverage.vault == owner) filled with the premium routed to the owner is REJECTED on-chain (spend script failure — is_vault_distinct False)",
+      "priorWireFormatProofs": "pre-hardening (hash 06ae8ee4…, wire formats UNCHANGED): create-order 477e2997326bc455ab10d20f373d2e7aed5013272e6e1861b50ee06c7f8e28b4; atomic insured swap c458c09f0985b62f7ed20afc307acc1b183b29c675b92b5e34ab3ce1708d10cf; uncovered fill + receipt d5c1ef1ef0242911ffd7f8f4e8d967ee5978a29c1600481d759c7fce716987dc; partial fill + relist a0510ef7b9af721a3bb378b4a18ecf892f6f4c7464c424af8f3d8ca8f89b4c97 (coverage + floor carried forward)",
       "pending": "a mainnet V3 submit is the only step not yet performed for V3"
     }
   },

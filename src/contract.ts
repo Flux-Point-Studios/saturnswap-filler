@@ -46,11 +46,16 @@ export const AUTHORIZE_PAYMENT_CRED = "7c2328db12987149ce8fdbbaa932c11542e24d6bd
 
 // ---- V3 (PlutusV3, PREPROD) ----
 // The V3 saturn_swap validator adds the min_partial_fill floor + optional Aegis Coverage
-// (a per-fill premium OUTPUT to the coverage vault; NOT a treasury_donation). It is deployed
-// on PREPROD (mainnet V3 is pending). Its baked fee_address is read from the preprod reference
+// (a per-fill premium OUTPUT to the coverage vault; NOT a treasury_donation) + a CIP-69
+// fill-receipt mint on the same script (receipt policy id == script hash). It is deployed on
+// PREPROD (mainnet V3 is pending). Its baked fee_address is read from the preprod reference
 // script; mainnet V3 will bake a production fee_address. fee_percent is compiled in at 100
 // (1%), the same rate as the mainnet 1% deployment. The order address is an ENTERPRISE script
 // address (type-7, no stake), unlike the mainnet base addresses.
+// The applied hash below is the HARDENED build (ec457591…, supersedes 06ae8ee4…): the receipt
+// mint now binds to a real SwapAction fill (payout-index == receipt owner_output_index,
+// PaymentDatum-tagged owner payout, on-chain-derived sold_amount), and a covered fill must pay
+// the premium to a vault distinct from owner/fee with a ≥1-unit floor.
 export const V3_FEE_ADDRESS_PREPROD =
   "addr_test1vrjau4npl8vg8fvp38ahj3lxu3wtlp3qyh2agu4u6vqxlds065ldr";
 export const V3_FEE_PAYMENT_CRED_PREPROD =
@@ -90,9 +95,9 @@ export const DEPLOYMENTS: Deployment[] = [
   },
   {
     version: "v3",
-    scriptHash: "06ae8ee43befbe36faa8ad239433a411201dcbe18f6721b60c9379bb",
-    orderAddress: "addr_test1wqr2arhy80hmudh64zkj89pn5sgjq8wtux8kwgdkpjfhnwczwmwqk",
-    refScript: { txHash: "8523aaaf17eb302905bf16dc9b8a53f920bd8a9771e6eb374ce1fc18cf5b50a0", outputIndex: 0 },
+    scriptHash: "ec457591a4f5ab0d070146558e5f1729fcc5c0b230472437be337625",
+    orderAddress: "addr_test1wrky2av35n66krg8q9r9trjlzu5le3wqkgcywfphhcehvfg03jugc",
+    refScript: { txHash: "efb2c0dc789d9bdf0f3988c01c2ca24fe43f16706086252d7576a6a0ad25fa7e", outputIndex: 0 },
     feePercentX100: V3_FEE_PERCENT_X100,
     plutusVersion: "v3",
     network: "preprod",
