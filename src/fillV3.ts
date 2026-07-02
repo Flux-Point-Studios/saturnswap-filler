@@ -495,6 +495,30 @@ export async function buildTakerFillV3(opts: BuildTakerFillV3Options): Promise<T
     tx = tx.validTo(Number(order.validBeforeTime) - 1);
   }
 
+  // Fund-sufficiency guard. The collateral is reserved as the sole coin-selection UTxO (see
+  // selectWallet above), so if the funding UTxOs plus the order's own lovelace cannot cover the
+  // fill's outputs, lucid pulls the collateral in as a SPENDING input to balance. That both
+  // shifts the order's canonical input index — the SwapAction / MintFillReceipt redeemers then
+  // read the wrong input via get_own_input_fast and the validator crashes ("Spend[N] the
+  // validator crashed") — and leaves the tx with no collateral. A COVERED PARTIAL fill trips
+  // this first: it already carries the most outputs (owner + fee + premium + relist), so adding
+  // the fill-receipt's ~min-UTxO output is what pushes the funding short. Fail fast, actionably.
+  const outputLovelace =
+    (plan.ownerOutputAssets["lovelace"] ?? 0n) +
+    (plan.feeOutputAssets["lovelace"] ?? 0n) +
+    (plan.premium?.assets["lovelace"] ?? 0n) +
+    (plan.relist?.assets["lovelace"] ?? 0n) +
+    receiptLovelaceOut;
+  const fundingLovelace = opts.fundingUtxos.reduce((s, u) => s + (u.assets["lovelace"] ?? 0n), 0n);
+  const orderLovelace = orderUtxo.assets["lovelace"] ?? 0n;
+  if (fundingLovelace + orderLovelace < outputLovelace)
+    throw new Error(
+      `insufficient funding: the fill's outputs need ${outputLovelace} lovelace but funding + the order ` +
+        `UTxO only provide ${fundingLovelace + orderLovelace} (funding ${fundingLovelace}, order ${orderLovelace})` +
+        (mintReceipt ? `, incl. ~${receiptLovelaceOut} for the fill-receipt output` : "") +
+        " — add funding UTxOs so the reserved collateral is not consumed as a spending input",
+    );
+
   const signBuilder = await tx.complete({ changeAddress, setCollateral: 5_000_000n });
   const unsignedCbor = signBuilder.toCBOR();
   const txHash = signBuilder.toHash();

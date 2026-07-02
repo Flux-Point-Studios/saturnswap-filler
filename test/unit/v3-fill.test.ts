@@ -270,6 +270,26 @@ describe("computeFillReceipt — the fill-receipt binding (V3 #5, red-team fix A
     expect(r.datum.orderReference).toEqual(coveredTokenBuy.utxo);
   });
 
+  it("covered partial, sell TOKEN → buy ADA: sold = input − continuation with the premium present", () => {
+    // The mainnet crash case: a COVERED PARTIAL fill also minting the receipt. The premium output
+    // sits between the fee and the relist, so `sold` must be derived from the sell delta
+    // (script_input_sell − continuation_sell), NOT read off any premium-shifted output, and
+    // `bought` must be the buy asset on the maker payout (owner output, index 0).
+    const plan = planPreprod(coveredAdaBuy, 60_000_000n); // >= floor 50M
+    expect(plan.premium).toBeDefined(); // covered ⇒ premium output present
+    expect(plan.premium!.required).toBe(600_000n); // 60M * 100 / 10000
+    expect(plan.relist).toBeDefined(); // partial ⇒ relist continuation present
+    const scriptInputSell = coveredAdaBuy.sell.amount; // 100M TOKEN in the spent order UTxO
+    const continuationSell = plan.relist!.assets[unit(TOKEN, NAME)] ?? 0n;
+    const r = computeFillReceipt(coveredAdaBuy, plan, scriptInputSell, 1_700_000_000_000n);
+    expect(r.soldAmount).toBe(scriptInputSell - continuationSell);
+    expect(r.soldAmount).toBe(20_000_000n); // 100M − 80M relisted
+    // bought = the ADA delivered to the maker payout, independent of the premium leg
+    expect(r.boughtAmount).toBe(plan.ownerOutputAssets["lovelace"]);
+    expect(r.boughtAmount).toBe(60_000_000n);
+    expect(r.datum.orderReference).toEqual(coveredAdaBuy.utxo);
+  });
+
   it("an uncovered order still mints a receipt (the receipt is coverage-independent)", () => {
     const plan = planPreprod(coveredTokenBuy, 25_000_000n);
     const uncoveredPlan = planPreprod(uncovered, 25_000_000n);
@@ -319,6 +339,79 @@ describe("computeFillPlanV3 — the premium is bounded (V3FS-01, fund-loss guard
     expect(() => planPreprod(coveredAdaBuy, coveredAdaBuy.buy.amount, 50n)).toThrow(/exceeds max 50/);
     // …and still builds when the bound is at/above the order's premium
     expect(planPreprod(coveredAdaBuy, coveredAdaBuy.buy.amount, 100n).premium!.required).toBe(3_000_000n);
+  });
+});
+
+describe("buildTakerFillV3 — fund-sufficiency guard (covered × partial × receipt crash prevention)", () => {
+  // A covered partial fill that also mints the receipt carries the most outputs (owner + fee +
+  // premium + relist + receipt). If the funding can't cover them, lucid pulls the reserved
+  // collateral in as a spending input — shifting the order's canonical input index (⇒ the
+  // validator reads the wrong input via get_own_input_fast and crashes) and leaving no collateral.
+  // The guard fails fast with an actionable message instead of that cryptic on-chain crash.
+  const orderUtxo = {
+    txHash: coveredAdaBuy.utxo.txHash,
+    outputIndex: 0,
+    address: V3_ADDR,
+    assets: { lovelace: coveredAdaBuy.scriptValue.lovelace, [unit(TOKEN, NAME)]: coveredAdaBuy.sell.amount },
+    datum: "d87980",
+  } as unknown as UTxO;
+  const refUtxo = {
+    txHash: V3_REF,
+    outputIndex: 0,
+    address: V3_ADDR,
+    assets: { lovelace: 20_000_000n },
+    scriptRef: { type: "PlutusV3", script: "59" },
+  } as unknown as UTxO;
+  function mockLucid(): LucidEvolution {
+    const pp = { coinsPerUtxoByte: 4310, costModels: { PlutusV3: [100788, 420, 1, 1] } };
+    const b: Record<string, unknown> = {};
+    const ret = () => b;
+    Object.assign(b, { collectFrom: ret, readFrom: ret, mintAssets: ret, validFrom: ret, validTo: ret });
+    b.pay = { ToAddressWithData: () => b };
+    b.complete = async () => {
+      throw new Error("__COMPLETE_REACHED__");
+    };
+    const cfg = { network: "Mainnet" as const, provider: { getProtocolParameters: async () => pp } };
+    return {
+      config: () => cfg,
+      utxosByOutRef: async (refs: { txHash: string; outputIndex: number }[]) =>
+        refs.map((r) => (r.txHash === orderUtxo.txHash ? orderUtxo : refUtxo)),
+      selectWallet: { fromAddress: () => {} },
+      unixTimeToSlot: (_ms: number) => 100_000_000,
+      newTx: () => b,
+    } as unknown as LucidEvolution;
+  }
+  const collateral = { txHash: "ee".repeat(32), outputIndex: 0, address: V3_ADDR, assets: { lovelace: 5_000_000n } } as UTxO;
+  const fund = (lovelace: bigint): UTxO[] => [
+    { txHash: "ff".repeat(32), outputIndex: 0, address: V3_ADDR, assets: { lovelace } } as UTxO,
+  ];
+
+  it("throws a clear insufficient-funding error instead of cannibalizing the collateral", async () => {
+    await expect(
+      buildTakerFillV3({
+        lucid: mockLucid(),
+        order: coveredAdaBuy,
+        userSellAmount: 60_000_000n, // owner alone needs 60M lovelace
+        fundingUtxos: fund(5_000_000n), // far too little
+        collateralUtxo: collateral,
+        network: "Mainnet",
+        mintReceipt: true,
+      }),
+    ).rejects.toThrow(/insufficient funding[\s\S]*fill-receipt/);
+  });
+
+  it("passes the guard when funding is adequate (proceeds to tx completion)", async () => {
+    await expect(
+      buildTakerFillV3({
+        lucid: mockLucid(),
+        order: coveredAdaBuy,
+        userSellAmount: 60_000_000n,
+        fundingUtxos: fund(100_000_000n), // covers every output
+        collateralUtxo: collateral,
+        network: "Mainnet",
+        mintReceipt: true,
+      }),
+    ).rejects.toThrow(/__COMPLETE_REACHED__/);
   });
 });
 
