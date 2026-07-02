@@ -53,7 +53,7 @@
       "scriptHash": "6023f59dce0064f1d6d27594dbea25bc4305a9f6a10f3a064037553a",
       "scriptAddress": "addr1z9sz8avaecqxfuwk6f6efkl2yk7yxpdf76ss7wsxgqm42wh2l9cdyhc0eja9mxq0lgeer90edhlfymnxv2ym3szcetqsp0ume8",
       "addressHeaderByte": "0x11",
-      "refScriptUtxo": "de19f6a99e0add4019b44f0bf0ad3fd35e59419e8639d5637e46b17c767bedb5#0",
+      "refScriptUtxo": "68a5c0bbf721a68b8049ba8807e348120a6bad599a81d163fa63cc961b2f35c4#0",
       "feeAddress": "addr1q8x4rlqhrq4rhqhnkamw3fdqmzqgum79yragg4gptcjpphmrc2rpt0exfch4s47fu32amr45vh9wg053hmcx9k7kkcrq6kxftd",
       "plutusVersion": "v3",
       "network": "mainnet",
@@ -227,7 +227,7 @@
     "status": "LIVE on mainnet (6023f59d…) and PROVEN on-chain",
     "scriptHash": "6023f59dce0064f1d6d27594dbea25bc4305a9f6a10f3a064037553a",
     "scriptAddress": "addr1z9sz8avaecqxfuwk6f6efkl2yk7yxpdf76ss7wsxgqm42wh2l9cdyhc0eja9mxq0lgeer90edhlfymnxv2ym3szcetqsp0ume8",
-    "refScriptUtxo": "de19f6a99e0add4019b44f0bf0ad3fd35e59419e8639d5637e46b17c767bedb5#0",
+    "refScriptUtxo": "68a5c0bbf721a68b8049ba8807e348120a6bad599a81d163fa63cc961b2f35c4#0",
     "feePercentX100": 100,
     "feeAddress": "addr1q8x4rlqhrq4rhqhnkamw3fdqmzqgum79yragg4gptcjpphmrc2rpt0exfch4s47fu32amr45vh9wg053hmcx9k7kkcrq6kxftd",
     "preprodTestBuild": {
@@ -295,7 +295,7 @@
     },
     "onChainProven": {
       "network": "mainnet",
-      "appliedHash": "6023f59dce0064f1d6d27594dbea25bc4305a9f6a10f3a064037553a (LIVE mainnet V3; order address addr1z9sz8ava…, ref de19f6a9…#0).",
+      "appliedHash": "6023f59dce0064f1d6d27594dbea25bc4305a9f6a10f3a064037553a (LIVE mainnet V3; order address addr1z9sz8ava…, ref 68a5c0bb…#0).",
       "createOrders": "b6bcaeb69401127ed650fea550c87464c7fed8aeef05f25950738db6ece754cc (create V3 orders on mainnet)",
       "fillWithReceipt": "bda03d5624466ed0d3838ed53c514b392e7bde6418bde08b159c959d135c7b98 (order spent with SwapAction; owner paid PaymentDatum-tagged; a fill-receipt mints under the swap policy id bound to the real fill — sold derived, bought = owner payout, executed_at = ledger POSIXTime)",
       "insuredCoveredFill": "fe17fb88fe4282e133e980808b9e11fc92aa0f7fe1ee3f89f3ab7a77abe4d784 (covered fill + premium output paid to the distinct Aegis vault)",

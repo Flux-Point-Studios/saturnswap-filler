@@ -2,7 +2,7 @@
 // carries three in-scope deployments:
 //   - current 1% V2 (hash 73990b71…, ref 0e16cd00…#0, fee_percent_x100 = 100)
 //   - legacy 4% V2 run-off (hash 1af84a9e…, ref 86cdaeed…#0, fee_percent_x100 = 400)
-//   - V3 (hash 6023f59d…, ref de19f6a9…#0, fee_percent_x100 = 100) — PlutusV3, adds the
+//   - V3 (hash 6023f59d…, ref 68a5c0bb…#0, fee_percent_x100 = 100) — PlutusV3, adds the
 //     min_partial_fill floor + optional Aegis coverage + a fill-receipt mint.
 // The two V2 deployments share the SAME baked fee_address + authorize credential and differ
 // ONLY in fee_percent; mainnet V3 bakes the SAME production fee_address.
@@ -69,7 +69,7 @@ export const V3_SCRIPT_HASH_MAINNET = "6023f59dce0064f1d6d27594dbea25bc4305a9f6a
 export const V3_ORDER_ADDRESS_MAINNET =
   "addr1z9sz8avaecqxfuwk6f6efkl2yk7yxpdf76ss7wsxgqm42wh2l9cdyhc0eja9mxq0lgeer90edhlfymnxv2ym3szcetqsp0ume8";
 export const V3_REF_SCRIPT_MAINNET = {
-  txHash: "de19f6a99e0add4019b44f0bf0ad3fd35e59419e8639d5637e46b17c767bedb5",
+  txHash: "68a5c0bbf721a68b8049ba8807e348120a6bad599a81d163fa63cc961b2f35c4",
   outputIndex: 0,
 };
 

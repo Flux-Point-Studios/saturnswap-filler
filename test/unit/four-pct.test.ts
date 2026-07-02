@@ -145,7 +145,7 @@ describe("per-order deployment resolution knows BOTH versions", () => {
     );
   });
 
-  it("deploymentByScriptHash(6023f59d…) -> the LIVE mainnet V3 (fee_percent 100, mainnet fee_address, ref de19f6a9…#0)", () => {
+  it("deploymentByScriptHash(6023f59d…) -> the LIVE mainnet V3 (fee_percent 100, mainnet fee_address, ref 68a5c0bb…#0)", () => {
     const d = deploymentByScriptHash(V3_SCRIPT_HASH_MAINNET)!;
     expect(d.version).toBe("v3");
     expect(d.plutusVersion).toBe("v3");

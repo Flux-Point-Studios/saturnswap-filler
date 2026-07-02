@@ -69,7 +69,7 @@ Primitives (independently testable / reusable)
 - `DEPLOYMENTS`, `deploymentByOrderAddress`, `deploymentByScriptHash`, `FEE_ADDRESS`.
 
 V3 (PlutusV3 — Aegis coverage + partial-fill floor + fill receipts; SPEC §12). **LIVE on mainnet**
-(`6023f59dce0064f1d6d27594dbea25bc4305a9f6a10f3a064037553a`, ref `de19f6a9…#0`, order address
+(`6023f59dce0064f1d6d27594dbea25bc4305a9f6a10f3a064037553a`, ref `68a5c0bb…#0`, order address
 `addr1z9sz8ava…`) — the default V3 discovery target, baking the **same** production `fee_address` as
 the V2 deployments. The preprod build (`ec457591…`, ref `efb2c0dc…#0`) is retained for the
 differential tests. The V3 validator enforces the covered-order **premium output** (to a vault
@@ -140,7 +140,7 @@ The **4% branch** is build- and UPLC-eval-proven (a non-auth fill against the ma
 ### V3 on-chain proofs (mainnet)
 
 V3 is **live on mainnet** at `6023f59dce0064f1d6d27594dbea25bc4305a9f6a10f3a064037553a` (order address
-`addr1z9sz8ava…`, ref script `de19f6a9…#0`). The covered-order premium, the fill-receipt binding, the
+`addr1z9sz8ava…`, ref script `68a5c0bb…#0`). The covered-order premium, the fill-receipt binding, the
 `min_partial_fill` floor + coverage carry-forward, cancels, and the LP emit/withdraw path are all
 proven on mainnet (mainnet tx ids, abbreviated):
 
