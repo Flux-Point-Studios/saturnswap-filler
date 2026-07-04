@@ -48,6 +48,14 @@ Model on GY's Smart Order Router (master doc §6.6):
 ## Keep the isolation guarantee
 This package must stay free of any `SaturnSwapBackend`/`SaturnSwapWeb` import — the whole point is that the agent fleet needs no SaturnSwap API, only a chain data source and a funded wallet + collateral. The reference bots inherit that property.
 
+## ADAM‑OC: where these bots live first (master doc §3.5/§6.7)
+
+Flux Point's **ADAM‑OC** (24/7 AI‑agent DeFi platform, already testing CIP‑0089 beacon‑token trading) is the first home for every strategy in this doc:
+- Ship the maker/hedged‑maker/filler strategies as **ADAM‑OC modules first**, then as the standalone open‑source bots — **same config vocabulary in both**, so a self‑hoster and a subscriber run identical logic. Self‑hosting stays free; the paid product is hosting/ops/strategy quality, never protocol access.
+- ADAM‑OC agents are the **day‑one market makers** for launch pairs and the **default graduation makers** for Liftoff tokens (master doc §7.6): at graduation, curve reserves convert into two‑way beacon orders laddered around the terminal curve price, and the agents take over quoting.
+- Under the recommended **0%‑protocol‑fee model**, drop `protocol_fee` from the operator P&L formula (§ filler bot) — fills cost only tx fee + min‑UTxO floors (+ coverage premium when applicable), which widens the set of profitable fills and shrinks the min‑profitable‑fill gate.
+- Hard rule, restated: **no ADAM‑OC‑only privileges** in this library or the bots — everything here must work identically for any operator, or the trust wedge dies.
+
 ## Follow‑up research (verified 2026 data → master doc §10–§13)
 Concrete params/choices now backed by the follow‑up research pass, for the bots above:
 - **Oracles (maker price feed):** use **Charli3** (PULL/on‑demand for active quoting) + **Orcfax** ($FACT, ~5‑min heartbeat) as a **multi‑oracle read**, not a single 5‑min AMM OHLC. Set staleness tolerance per the subscribed feed instance.
