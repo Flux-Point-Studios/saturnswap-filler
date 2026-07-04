@@ -47,3 +47,12 @@ Model on GY's Smart Order Router (master doc §6.6):
 
 ## Keep the isolation guarantee
 This package must stay free of any `SaturnSwapBackend`/`SaturnSwapWeb` import — the whole point is that the agent fleet needs no SaturnSwap API, only a chain data source and a funded wallet + collateral. The reference bots inherit that property.
+
+## Follow‑up research (verified 2026 data → master doc §10–§13)
+Concrete params/choices now backed by the follow‑up research pass, for the bots above:
+- **Oracles (maker price feed):** use **Charli3** (PULL/on‑demand for active quoting) + **Orcfax** ($FACT, ~5‑min heartbeat) as a **multi‑oracle read**, not a single 5‑min AMM OHLC. Set staleness tolerance per the subscribed feed instance.
+- **Spread floor (now cited):** half‑spread ≳ `k·σ·√τ` with `τ` in blocks — moving from an L2 to ~20 s Cardano blocks needs **~9× wider** spread for equal pickoff protection (LVR + microstructure literature). Measure ADA 20 s‑horizon σ before quoting live capital.
+- **A‑S implementation caveat:** Hummingbot multiplies by σ (std dev) where the paper uses σ² (variance) — reconcile before calibrating `γ`. Hand‑tune only `γ`, `inventory_target_base_pct`, `order_amount`, `order_refresh_time`, size‑skew `η`; σ/A/k are auto‑estimated.
+- **Hedged variant:** **Binance** is the primary ADA hedge venue (Bybit/OKX secondary; **not** Coinbase). Latency budget is **seconds** (block‑dominated), not sub‑ms — optimize for reliable fill‑detection + hedge‑confirmation. Model perp funding as a P&L line; cap leverage. Verified Hummingbot XEMM defaults: `slippage_buffer` 5%, `order_size_taker_balance_factor` 99.5%, `conversion_rate_mode` oracle.
+- **Gas abstraction:** integrate **FluidTokens Aquarium** babel fees so the bot holds only its trading token, not an ADA gas buffer.
+- **Distribution:** the filler/quote interface should be **DexHunter‑routable** (aggregators carry a large share of Cardano flow). Publish the agent on **Sokosumi** (Masumi marketplace) for discovery; expose **MIP‑003** endpoints for A2A/MCP interop.
