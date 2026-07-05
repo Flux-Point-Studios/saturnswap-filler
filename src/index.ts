@@ -25,3 +25,4 @@ export * from "./datumV4.js";
 export * from "./discoveryV4.js";
 export * from "./ratioV4.js";
 export * from "./fillPlanV4.js";
+export * from "./fillV4.js";
