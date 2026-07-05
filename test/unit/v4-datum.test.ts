@@ -9,7 +9,7 @@ import {
   repriceRedeemer,
   twoWaySwapRedeemer,
   receiptTokenName,
-  fillReceiptDatumToPlutusData,
+  fillReceiptDatumV4ToPlutusData,
   type CoverageV4,
 } from "../../src/datumV4.js";
 import { plutusToBytes, plutusToHex } from "../../src/plutus.js";
@@ -137,7 +137,7 @@ describe("V4 fill-receipt token name (cross-checked vs on-chain vector)", () => 
   });
 
   it("FillReceiptDatum encodes to Constr0 with 8 fields", () => {
-    const d = fillReceiptDatumToPlutusData({
+    const d = fillReceiptDatumV4ToPlutusData({
       orderReference: orderRef,
       maker: owner,
       policyIdSell: "",

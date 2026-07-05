@@ -70,7 +70,7 @@ export interface CoverageV4 {
   policyRef: OutputRef;
 }
 
-export function coverageToPlutusData(c: CoverageV4): PlutusData {
+export function coverageV4ToPlutusData(c: CoverageV4): PlutusData {
   return PConstr(0, [addressToPlutusData(c.vault), PInt(c.premiumBps), outputRefToPlutusData(c.policyRef)]);
 }
 
@@ -129,7 +129,7 @@ export function orderDatumToPlutusData(d: {
     PInt(d.amountBuy),
     pOptInt(d.validBeforeTime),
     PInt(d.minPartialFill),
-    d.coverage === null ? PConstr(1, []) : PConstr(0, [coverageToPlutusData(d.coverage)]),
+    d.coverage === null ? PConstr(1, []) : PConstr(0, [coverageV4ToPlutusData(d.coverage)]),
     outputRefToPlutusData(d.outputReference),
   ]);
 }
@@ -313,7 +313,7 @@ export interface FillReceiptDatumV4 {
   bought: bigint;
 }
 
-export function fillReceiptDatumToPlutusData(r: FillReceiptDatumV4): PlutusData {
+export function fillReceiptDatumV4ToPlutusData(r: FillReceiptDatumV4): PlutusData {
   return PConstr(0, [
     outputRefToPlutusData(r.orderReference),
     addressToPlutusData(r.maker),
