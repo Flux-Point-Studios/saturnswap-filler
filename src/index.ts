@@ -18,7 +18,10 @@ export * from "./fillV3.js";
 export * from "./cancel.js";
 export { CborReader, CborWriter } from "./cbor.js";
 
-// V4 (CIP-0089 distributed order book): beacon discovery + datum/redeemer codecs.
+// V4 (CIP-0089 distributed order book): beacon discovery + datum/redeemer
+// codecs + fill/swap planners.
 export * from "./beaconsV4.js";
 export * from "./datumV4.js";
 export * from "./discoveryV4.js";
+export * from "./ratioV4.js";
+export * from "./fillPlanV4.js";
