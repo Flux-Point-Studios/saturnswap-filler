@@ -4,7 +4,20 @@ import { planTakerFillV4Tx, type V4Deployment } from "../../src/fillV4.js";
 import { addAsset } from "../../src/fillPlanV4.js";
 import { pairBeaconName, offerBeaconName, askBeaconName } from "../../src/beaconsV4.js";
 import { decodeOrderDatumV4, receiptTokenName } from "../../src/datumV4.js";
+import { decodePlutusHex } from "../../src/plutus.js";
 import { hexToBytes } from "../../src/cbor.js";
+
+/** Extract the three ints (buy_amount, input_index, output_index) from a Fill
+ *  redeemer hex — Constr0[int, int, int]. */
+function decodeFillRedeemer(hex: string): { buyAmount: bigint; inputIndex: bigint; outputIndex: bigint } {
+  const d = decodePlutusHex(hex);
+  if (d.kind !== "constr" || d.alt !== 0 || d.fields.length !== 3) throw new Error("not a Fill redeemer");
+  const asInt = (p: (typeof d.fields)[number]) => {
+    if (p.kind !== "int") throw new Error("Fill field not an int");
+    return p.value;
+  };
+  return { buyAmount: asInt(d.fields[0]!), inputIndex: asInt(d.fields[1]!), outputIndex: asInt(d.fields[2]!) };
+}
 import { unit, type ChainValue } from "../../src/discovery.js";
 import type { OrderDatumV4 } from "../../src/datumV4.js";
 import type { OwnerAddress, OutputRef } from "../../src/datum.js";
@@ -107,6 +120,13 @@ describe("planTakerFillV4Tx — full fill", () => {
   it("no continuation output on a full fill", () => {
     expect(recipe.outputs.find((x) => x.role === "continuation")).toBeUndefined();
   });
+
+  it("Fill redeemer output_index is the owner index (ignored on-chain for full fills)", () => {
+    const r = decodeFillRedeemer(recipe.spendRedeemerHex);
+    expect(r.buyAmount).toBe(400n);
+    expect(Number(r.outputIndex)).toBe(recipe.redeemerOutputIndex);
+    expect(recipe.redeemerOutputIndex).toBe(recipe.ownerOutputIndex);
+  });
 });
 
 describe("planTakerFillV4Tx — partial fill", () => {
@@ -132,6 +152,19 @@ describe("planTakerFillV4Tx — partial fill", () => {
 
   it("only the spend ref is read (no beacon burn)", () => {
     expect(recipe.refInputs.length).toBe(1);
+  });
+
+  it("Fill redeemer output_index points at the CONTINUATION, not the owner (regression)", () => {
+    const contIndex = recipe.outputs.findIndex((x) => x.role === "continuation");
+    expect(contIndex).toBeGreaterThan(0); // continuation is not output 0 (owner is)
+    // the validator reads output_at(output_index) and decodes it as an OrderDatum,
+    // so the redeemer MUST point at the continuation — pointing at the owner (0)
+    // would make validate_partial_fill fail decoding the PaymentDatum.
+    expect(recipe.redeemerOutputIndex).toBe(contIndex);
+    expect(recipe.redeemerOutputIndex).not.toBe(recipe.ownerOutputIndex);
+    const r = decodeFillRedeemer(recipe.spendRedeemerHex);
+    expect(Number(r.outputIndex)).toBe(contIndex);
+    expect(r.buyAmount).toBe(100n);
   });
 });
 

@@ -88,8 +88,16 @@ export interface TakerFillRecipe {
   inputIndex: number;
   spendRedeemerHex: string;
   outputs: RecipeOutput[];
-  /** index of the owner payout in `outputs` (the Fill redeemer's output_index) */
+  /** index of the owner payout in `outputs`. The owner is found on-chain by a
+   *  tagged-scan (utils.tagged_payment_value), so its position is free — this is
+   *  NOT the Fill redeemer's output_index. */
   ownerOutputIndex: number;
+  /** the output_index encoded in the Fill redeemer. PARTIAL: the CONTINUATION's
+   *  index — validate_partial_fill reads output_at(output_index) and decodes it
+   *  as the relisted OrderDatum, so it MUST point at the continuation, not the
+   *  owner. FULL: unused on-chain (validate_full_fill ignores output_index), set
+   *  to the owner index. */
+  redeemerOutputIndex: number;
   /** grouped by minting policy/redeemer (beacon burn, receipt mint) */
   mints: RecipeMintGroup[];
   /** reference-script UTxOs to read */
@@ -193,6 +201,11 @@ export function planTakerFillV4Tx(args: PlanTakerFillV4Args): TakerFillRecipe {
 
   const mints: RecipeMintGroup[] = [];
   const refInputs: OutputRef[] = [deployment.spendRefUtxo];
+  // The Fill redeemer's output_index. On a partial fill the validator reads it
+  // as the CONTINUATION (output_at(output_index) decoded as OrderDatum), so it
+  // must be the continuation's actual index — NOT ownerOutputIndex. On a full
+  // fill it is ignored on-chain, so the owner index is a fine default.
+  let redeemerOutputIndex = ownerOutputIndex;
 
   // continuation (partial) or beacon burn (full)
   if (plan.kind === "partial") {
@@ -202,6 +215,7 @@ export function planTakerFillV4Tx(args: PlanTakerFillV4Args): TakerFillRecipe {
       amountBuy: plan.continuation!.newAmountBuy,
       outputReference: orderRef,
     };
+    redeemerOutputIndex = outputs.length; // the continuation is appended next
     outputs.push({
       role: "continuation",
       addressBech32: order.address, // MUST equal the order's own per-user address
@@ -260,9 +274,10 @@ export function planTakerFillV4Tx(args: PlanTakerFillV4Args): TakerFillRecipe {
     plan,
     spendInputs,
     inputIndex,
-    spendRedeemerHex: plutusToHex(fillRedeemer(args.buyAmount, inputIndex, ownerOutputIndex)),
+    spendRedeemerHex: plutusToHex(fillRedeemer(args.buyAmount, inputIndex, redeemerOutputIndex)),
     outputs,
     ownerOutputIndex,
+    redeemerOutputIndex,
     mints,
     refInputs,
     validToUnixMs: order.datum.validBeforeTime !== null ? Number(order.datum.validBeforeTime) - 1 : null,
