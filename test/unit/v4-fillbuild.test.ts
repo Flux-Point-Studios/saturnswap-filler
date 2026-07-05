@@ -31,7 +31,6 @@ const feeAddressBech32 = credentialToAddress("Preprod", { type: "Key", hash: "66
 const deployment: V4Deployment = {
   network: "Preprod",
   orderScriptHash: ORDER_SCRIPT_HASH,
-  orderAddressBech32,
   beaconPolicy: BEACON,
   feeAddressBech32,
   feePercentBps: 0,
@@ -74,7 +73,7 @@ const funding: OutputRef[] = [{ txHash: "bb".repeat(32), outputIndex: 0 }];
 
 describe("planTakerFillV4Tx — full fill", () => {
   const o = adaOrder();
-  const recipe = planTakerFillV4Tx({ deployment, order: { datum: o, utxo: orderRef, scriptValue: orderValue(o) }, buyAmount: 400n, fundingInputs: funding });
+  const recipe = planTakerFillV4Tx({ deployment, order: { datum: o, utxo: orderRef, scriptValue: orderValue(o), address: orderAddressBech32 }, buyAmount: 400n, fundingInputs: funding });
 
   it("spends the order with a Fill redeemer pointing at owner output 0", () => {
     expect(recipe.kind).toBe("full");
@@ -112,7 +111,7 @@ describe("planTakerFillV4Tx — full fill", () => {
 
 describe("planTakerFillV4Tx — partial fill", () => {
   const o = adaOrder();
-  const recipe = planTakerFillV4Tx({ deployment, order: { datum: o, utxo: orderRef, scriptValue: orderValue(o) }, buyAmount: 100n, fundingInputs: funding });
+  const recipe = planTakerFillV4Tx({ deployment, order: { datum: o, utxo: orderRef, scriptValue: orderValue(o), address: orderAddressBech32 }, buyAmount: 100n, fundingInputs: funding });
 
   it("relists a continuation with reduced amounts and the same pair, no mint", () => {
     expect(recipe.kind).toBe("partial");
@@ -140,7 +139,7 @@ describe("planTakerFillV4Tx — Model A fee + coverage + receipt", () => {
   it("adds a fee output in the sell asset under Model A", () => {
     const o = adaOrder({ policyIdSell: TOKEN_POLICY, assetNameSell: TOKEN_NAME, amountSell: 1000n, policyIdBuy: "", assetNameBuy: "", amountBuy: 50_000_000n });
     const dep: V4Deployment = { ...deployment, feePercentBps: 100 };
-    const recipe = planTakerFillV4Tx({ deployment: dep, order: { datum: o, utxo: orderRef, scriptValue: orderValue(o) }, buyAmount: 50_000_000n, fundingInputs: funding });
+    const recipe = planTakerFillV4Tx({ deployment: dep, order: { datum: o, utxo: orderRef, scriptValue: orderValue(o), address: orderAddressBech32 }, buyAmount: 50_000_000n, fundingInputs: funding });
     const fee = recipe.outputs.find((x) => x.role === "fee")!;
     expect(fee.addressBech32).toBe(feeAddressBech32);
     expect(fee.assets[unit(TOKEN_POLICY, TOKEN_NAME)]).toBe(10n); // 1% of 1000 released
@@ -150,14 +149,14 @@ describe("planTakerFillV4Tx — Model A fee + coverage + receipt", () => {
     const o = adaOrder({
       coverage: { vault: { payment: { type: "key", hash: "77".repeat(28) } }, premiumBps: 500n, policyRef: { txHash: "00".repeat(32), outputIndex: 0 } },
     });
-    const recipe = planTakerFillV4Tx({ deployment, order: { datum: o, utxo: orderRef, scriptValue: orderValue(o) }, buyAmount: 100n, fundingInputs: funding });
+    const recipe = planTakerFillV4Tx({ deployment, order: { datum: o, utxo: orderRef, scriptValue: orderValue(o), address: orderAddressBech32 }, buyAmount: 100n, fundingInputs: funding });
     const cov = recipe.outputs.find((x) => x.role === "coverage")!;
     expect(cov.assets[unit(TOKEN_POLICY, TOKEN_NAME)]).toBe(5n); // 5% of 100
   });
 
   it("mints a receipt bound to the fill (bought == buy_amount), name = sha256(cbor(orderRef))", () => {
     const o = adaOrder();
-    const recipe = planTakerFillV4Tx({ deployment, order: { datum: o, utxo: orderRef, scriptValue: orderValue(o) }, buyAmount: 400n, fundingInputs: funding, mintReceipt: true });
+    const recipe = planTakerFillV4Tx({ deployment, order: { datum: o, utxo: orderRef, scriptValue: orderValue(o), address: orderAddressBech32 }, buyAmount: 400n, fundingInputs: funding, mintReceipt: true });
     const receiptUnit = RECEIPT_POLICY + receiptTokenName(orderRef);
     const receiptMint = recipe.mints.find((g) => g.assets.some((m) => m.unit === receiptUnit))!;
     expect(receiptMint).toBeDefined();
@@ -173,12 +172,12 @@ describe("planTakerFillV4Tx — Model A fee + coverage + receipt", () => {
 describe("planTakerFillV4Tx — expiry + guards", () => {
   it("sets validTo to expiry-1 when the order has a deadline", () => {
     const o = adaOrder({ validBeforeTime: 1_700_000_000_000n });
-    const recipe = planTakerFillV4Tx({ deployment, order: { datum: o, utxo: orderRef, scriptValue: orderValue(o) }, buyAmount: 400n, fundingInputs: funding });
+    const recipe = planTakerFillV4Tx({ deployment, order: { datum: o, utxo: orderRef, scriptValue: orderValue(o), address: orderAddressBech32 }, buyAmount: 400n, fundingInputs: funding });
     expect(recipe.validToUnixMs).toBe(1_699_999_999_999);
   });
 
   it("propagates planner guards (overfill / dust)", () => {
     const o = adaOrder();
-    expect(() => planTakerFillV4Tx({ deployment, order: { datum: o, utxo: orderRef, scriptValue: orderValue(o) }, buyAmount: 401n, fundingInputs: funding })).toThrow(/exceeds/);
+    expect(() => planTakerFillV4Tx({ deployment, order: { datum: o, utxo: orderRef, scriptValue: orderValue(o), address: orderAddressBech32 }, buyAmount: 401n, fundingInputs: funding })).toThrow(/exceeds/);
   });
 });

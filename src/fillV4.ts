@@ -42,14 +42,16 @@ export interface V4Deployment {
   network: Network;
   /** saturn_swap_v4 spend script hash (H_spend) */
   orderScriptHash: string;
-  /** bech32 order address = script(H_spend) + the maker's staking cred */
-  orderAddressBech32: string;
   /** beacon_limit policy id (P_limit) */
   beaconPolicy: string;
   /** fee_address bech32 (only used when feePercentBps > 0 — Model A) */
   feeAddressBech32: string;
   /** deployment fee in basis points (0 = Model B) */
   feePercentBps: number;
+  // NOTE: there is no single "order address" — each maker's order lives at a
+  // PER-USER address (this shared script hash + the maker's own staking
+  // credential). Continuations must return to the ORDER'S OWN address (carried
+  // on the order being filled), never a global address.
   /** reference-script UTxO carrying the applied saturn_swap_v4 validator */
   spendRefUtxo: OutputRef;
   /** reference-script UTxO carrying beacon_limit (needed for full-fill burn) */
@@ -127,10 +129,15 @@ function credToBech32(
 
 export interface PlanTakerFillV4Args {
   deployment: V4Deployment;
-  order: { datum: OrderDatumV4; utxo: OutputRef; scriptValue: ChainValue };
+  /** the order being filled: its datum, outref, current value, and its OWN
+   *  per-user address (the continuation must return to exactly this address) */
+  order: { datum: OrderDatumV4; utxo: OutputRef; scriptValue: ChainValue; address: string };
   buyAmount: bigint;
   /** funding input outrefs (for the canonical input sort / index) */
   fundingInputs: TxIn[];
+  /** where a minted fill receipt lands (defaults to the order owner's address);
+   *  receipts are transferable, so the taker typically sends them to itself */
+  receiptAddressBech32?: string;
   mintReceipt?: boolean;
   coinsPerUtxoByte?: bigint;
 }
@@ -197,7 +204,7 @@ export function planTakerFillV4Tx(args: PlanTakerFillV4Args): TakerFillRecipe {
     };
     outputs.push({
       role: "continuation",
-      addressBech32: deployment.orderAddressBech32,
+      addressBech32: order.address, // MUST equal the order's own per-user address
       assets: chainValueToAssets(plan.continuation!.value),
       inlineDatumHex: plutusToHex(orderDatumToPlutusData(datumForBuilder(contDatum))),
     });
@@ -234,10 +241,11 @@ export function planTakerFillV4Tx(args: PlanTakerFillV4Args): TakerFillRecipe {
         bought: args.buyAmount,
       }),
     );
+    const receiptAddr = args.receiptAddressBech32 ?? credToBech32(order.datum.owner, deployment.network);
     outputs.push({
       role: "receipt",
-      addressBech32: deployment.orderAddressBech32, // placeholder; caller may redirect to its own addr
-      assets: floorMinUtxo({ [receiptUnit]: 1n } as Assets, deployment.orderAddressBech32, coinsPerUtxoByte, receiptDatumHex),
+      addressBech32: receiptAddr,
+      assets: floorMinUtxo({ [receiptUnit]: 1n } as Assets, receiptAddr, coinsPerUtxoByte, receiptDatumHex),
       inlineDatumHex: receiptDatumHex,
     });
     mints.push({
@@ -264,11 +272,12 @@ export function planTakerFillV4Tx(args: PlanTakerFillV4Args): TakerFillRecipe {
 export interface BuildTakerFillV4Options {
   lucid: LucidEvolution;
   deployment: V4Deployment;
-  order: { datum: OrderDatumV4; utxo: OutputRef; scriptValue: ChainValue };
+  order: { datum: OrderDatumV4; utxo: OutputRef; scriptValue: ChainValue; address: string };
   buyAmount: bigint;
   fundingUtxos: UTxO[];
   collateralUtxo: UTxO;
   changeAddress?: string;
+  receiptAddressBech32?: string;
   mintReceipt?: boolean;
   coinsPerUtxoByte?: bigint;
 }
@@ -289,6 +298,7 @@ export async function buildTakerFillV4(opts: BuildTakerFillV4Options): Promise<T
     order,
     buyAmount: opts.buyAmount,
     fundingInputs: opts.fundingUtxos.map((u) => ({ txHash: u.txHash, outputIndex: u.outputIndex })),
+    receiptAddressBech32: opts.receiptAddressBech32,
     mintReceipt: opts.mintReceipt,
     coinsPerUtxoByte: opts.coinsPerUtxoByte,
   });

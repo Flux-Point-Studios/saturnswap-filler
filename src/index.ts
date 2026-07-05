@@ -26,3 +26,5 @@ export * from "./discoveryV4.js";
 export * from "./ratioV4.js";
 export * from "./fillPlanV4.js";
 export * from "./fillV4.js";
+export * from "./lifecycleV4.js";
+export * from "./swapV4.js";
