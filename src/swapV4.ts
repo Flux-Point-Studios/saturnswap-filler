@@ -13,8 +13,15 @@ import { computeSwapPlanV4 } from "./fillPlanV4.js";
 import type { ChainValue } from "./discovery.js";
 import { inputIndexOf, type TxIn } from "./sort.js";
 import { minUtxoLovelace } from "./minUtxo.js";
-import { V4_MAINNET_COINS_PER_UTXO_BYTE, type V4Deployment, type RecipeOutput, type RecipeMintGroup } from "./fillV4.js";
-import { orderAddressFor, type LifecycleRecipe } from "./lifecycleV4.js";
+import type { LucidEvolution, UTxO } from "@lucid-evolution/lucid";
+import {
+  V4_MAINNET_COINS_PER_UTXO_BYTE,
+  assembleV4Tx,
+  type V4Deployment,
+  type RecipeOutput,
+  type RecipeMintGroup,
+} from "./fillV4.js";
+import { twoWayOrderAddressFor, type LifecycleRecipe } from "./lifecycleV4.js";
 import type { OutputRef, Credential } from "./datum.js";
 
 function chainValueToAssets(v: ChainValue): Record<string, bigint> {
@@ -52,8 +59,9 @@ function datumForBuilder(d: TwoWayOrderDatumV4) {
 
 export interface PlanCreateTwoWayOrderV4Args {
   deployment: V4Deployment;
-  /** the two-way datum to post (beaconPolicy = deployment.beaconPolicy; the pair
-   *  MUST be lexicographically sorted asset1 < asset2 — validated here) */
+  /** the two-way datum to post. Its beaconPolicy is OVERRIDDEN to the deployment's
+   *  ammPolicy (P_amm) — two-way beacons live under the AMM policy, never P_limit.
+   *  The pair MUST be lexicographically sorted asset1 < asset2 (validated here). */
   datum: TwoWayOrderDatumV4;
   makerStake: Credential;
   /** initial reserves to lock (must include >= 1 of at least one paired asset) */
@@ -63,15 +71,20 @@ export interface PlanCreateTwoWayOrderV4Args {
 }
 
 export function planCreateTwoWayOrderV4Tx(args: PlanCreateTwoWayOrderV4Args): LifecycleRecipe {
-  const { deployment, datum } = args;
+  const { deployment } = args;
   const cpb = args.coinsPerUtxoByte ?? V4_MAINNET_COINS_PER_UTXO_BYTE;
-  if (datum.beaconPolicy !== deployment.beaconPolicy) throw new Error("datum.beaconPolicy must equal deployment.beaconPolicy");
+  if (!deployment.twoWayScriptHash || !deployment.ammPolicy || !deployment.ammRefUtxo)
+    throw new Error("two-way create requires deployment.twoWayScriptHash + ammPolicy + ammRefUtxo");
+  // Two-way beacons mint under the AMM policy — pin the datum's beaconPolicy to it
+  // so the posted order self-describes the P_amm book (never the P_limit slot).
+  const ammPolicy = deployment.ammPolicy;
+  const datum: TwoWayOrderDatumV4 = { ...args.datum, beaconPolicy: ammPolicy };
   if (compareAsset(datum.policyId1, datum.assetName1, datum.policyId2, datum.assetName2) >= 0)
     throw new Error("pair must be strictly sorted (asset1 < asset2)");
   if (datum.price1Num <= 0n || datum.price1Den <= 0n || datum.price2Num <= 0n || datum.price2Den <= 0n)
     throw new Error("all prices must be > 0");
 
-  const orderAddress = orderAddressFor(deployment, args.makerStake);
+  const orderAddress = twoWayOrderAddressFor(deployment, args.makerStake);
   const pairName = sortedPairBeaconName(datum.policyId1, datum.assetName1, datum.policyId2, datum.assetName2);
   const offer1 = offerBeaconName(datum.policyId1, datum.assetName1);
   const offer2 = offerBeaconName(datum.policyId2, datum.assetName2);
@@ -82,9 +95,9 @@ export function planCreateTwoWayOrderV4Tx(args: PlanCreateTwoWayOrderV4Args): Li
   const has1 = qty(value, datum.policyId1, datum.assetName1) > 0n;
   const has2 = qty(value, datum.policyId2, datum.assetName2) > 0n;
   if (!has1 && !has2) throw new Error("two-way order needs non-zero inventory of at least one paired asset");
-  value[deployment.beaconPolicy + pairName] = 1n;
-  value[deployment.beaconPolicy + offer1] = 1n;
-  value[deployment.beaconPolicy + offer2] = 1n;
+  value[ammPolicy + pairName] = 1n;
+  value[ammPolicy + offer1] = 1n;
+  value[ammPolicy + offer2] = 1n;
 
   const datumHex = plutusToHex(twoWayDatumToPlutusData(datumForBuilder(datum)));
   return {
@@ -94,13 +107,13 @@ export function planCreateTwoWayOrderV4Tx(args: PlanCreateTwoWayOrderV4Args): Li
       {
         redeemerHex: plutusToHex(beaconCreateOrClose),
         assets: [
-          { unit: deployment.beaconPolicy + pairName, quantity: 1n },
-          { unit: deployment.beaconPolicy + offer1, quantity: 1n },
-          { unit: deployment.beaconPolicy + offer2, quantity: 1n },
+          { unit: ammPolicy + pairName, quantity: 1n },
+          { unit: ammPolicy + offer1, quantity: 1n },
+          { unit: ammPolicy + offer2, quantity: 1n },
         ],
       },
     ],
-    refInputs: [deployment.beaconRefUtxo],
+    refInputs: [deployment.ammRefUtxo],
     validToUnixMs: null,
   };
 }
@@ -138,6 +151,7 @@ export interface PlanTwoWaySwapV4Args {
 export function planTwoWaySwapV4Tx(args: PlanTwoWaySwapV4Args): TwoWaySwapRecipe {
   const { deployment, order } = args;
   const cpb = args.coinsPerUtxoByte ?? V4_MAINNET_COINS_PER_UTXO_BYTE;
+  if (!deployment.twoWaySpendRefUtxo) throw new Error("two-way swap requires deployment.twoWaySpendRefUtxo");
   const orderRef = order.utxo;
 
   const plan = computeSwapPlanV4(order.datum, order.scriptValue, args.takeAsset1, args.takeAmount, deployment.feePercentBps);
@@ -156,7 +170,7 @@ export function planTwoWaySwapV4Tx(args: PlanTwoWaySwapV4Args): TwoWaySwapRecipe
   ];
 
   const mints: RecipeMintGroup[] = [];
-  const refInputs: OutputRef[] = [deployment.spendRefUtxo];
+  const refInputs: OutputRef[] = [deployment.twoWaySpendRefUtxo];
 
   // Model-A fee leg (in the TAKEN asset) — the two-way validator checks it via
   // a tagged fee output; deployment feePercentBps=0 (Model B) omits it.
@@ -179,4 +193,93 @@ export function planTwoWaySwapV4Tx(args: PlanTwoWaySwapV4Args): TwoWaySwapRecipe
     },
     validToUnixMs: order.datum.validBeforeTime !== null ? Number(order.datum.validBeforeTime) - 1 : null,
   };
+}
+
+// ---- thin @lucid-evolution assemblers over the two-way planners ----
+
+export interface BuildCreateTwoWayOrderV4Options {
+  lucid: LucidEvolution;
+  deployment: V4Deployment;
+  datum: TwoWayOrderDatumV4;
+  makerStake: Credential;
+  reserves: ChainValue;
+  fundingUtxos: UTxO[];
+  collateralUtxo: UTxO;
+  changeAddress?: string;
+  depositLovelace?: bigint;
+  coinsPerUtxoByte?: bigint;
+}
+
+export interface CreateTwoWayOrderV4Result {
+  unsignedCbor: string;
+  txHash: string;
+  recipe: LifecycleRecipe;
+}
+
+/** Assemble a create-two-way-order tx (mints the sorted-pair + 2 offer beacons). */
+export async function buildCreateTwoWayOrderV4(opts: BuildCreateTwoWayOrderV4Options): Promise<CreateTwoWayOrderV4Result> {
+  const changeAddress = opts.changeAddress ?? opts.collateralUtxo.address;
+  const recipe = planCreateTwoWayOrderV4Tx({
+    deployment: opts.deployment,
+    datum: opts.datum,
+    makerStake: opts.makerStake,
+    reserves: opts.reserves,
+    depositLovelace: opts.depositLovelace,
+    coinsPerUtxoByte: opts.coinsPerUtxoByte,
+  });
+  const { unsignedCbor, txHash } = await assembleV4Tx({
+    lucid: opts.lucid,
+    changeAddress,
+    collateralUtxo: opts.collateralUtxo,
+    fundingUtxos: opts.fundingUtxos,
+    refInputs: recipe.refInputs,
+    outputs: recipe.outputs,
+    mints: recipe.mints,
+    validToUnixMs: recipe.validToUnixMs,
+    requiredStakeKeyHash: recipe.requiredStakeKeyHash,
+  });
+  return { unsignedCbor, txHash, recipe };
+}
+
+export interface BuildTwoWaySwapV4Options {
+  lucid: LucidEvolution;
+  deployment: V4Deployment;
+  order: { datum: TwoWayOrderDatumV4; utxo: OutputRef; scriptValue: ChainValue; address: string };
+  takeAsset1: boolean;
+  takeAmount: bigint;
+  fundingUtxos: UTxO[];
+  collateralUtxo: UTxO;
+  changeAddress?: string;
+  coinsPerUtxoByte?: bigint;
+}
+
+export interface TwoWaySwapV4Result {
+  unsignedCbor: string;
+  txHash: string;
+  recipe: TwoWaySwapRecipe;
+}
+
+/** Assemble a two-way swap tx (net-zero beacons; reserves rebalanced per the plan). */
+export async function buildTwoWaySwapV4(opts: BuildTwoWaySwapV4Options): Promise<TwoWaySwapV4Result> {
+  const changeAddress = opts.changeAddress ?? opts.collateralUtxo.address;
+  const recipe = planTwoWaySwapV4Tx({
+    deployment: opts.deployment,
+    order: opts.order,
+    takeAsset1: opts.takeAsset1,
+    takeAmount: opts.takeAmount,
+    fundingInputs: opts.fundingUtxos.map((u) => ({ txHash: u.txHash, outputIndex: u.outputIndex })),
+    coinsPerUtxoByte: opts.coinsPerUtxoByte,
+  });
+  const { unsignedCbor, txHash } = await assembleV4Tx({
+    lucid: opts.lucid,
+    changeAddress,
+    collateralUtxo: opts.collateralUtxo,
+    fundingUtxos: opts.fundingUtxos,
+    refInputs: recipe.refInputs,
+    outputs: recipe.outputs,
+    mints: recipe.mints,
+    validToUnixMs: recipe.validToUnixMs,
+    spends: [recipe.spend],
+  });
+  return { unsignedCbor, txHash, recipe };
 }

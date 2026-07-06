@@ -10,7 +10,7 @@
 // in extra_signatories, or a script via the withdraw-zero trick.
 
 import { credentialToAddress } from "@lucid-evolution/lucid";
-import type { Network } from "@lucid-evolution/lucid";
+import type { Network, LucidEvolution, UTxO } from "@lucid-evolution/lucid";
 import type { OrderDatumV4 } from "./datumV4.js";
 import {
   orderDatumToPlutusData,
@@ -25,21 +25,40 @@ import { plutusToHex } from "./plutus.js";
 import type { ChainValue } from "./discovery.js";
 import { inputIndexOf, type TxIn } from "./sort.js";
 import { minUtxoLovelace } from "./minUtxo.js";
-import { V4_MAINNET_COINS_PER_UTXO_BYTE, type V4Deployment, type RecipeOutput, type RecipeMintGroup } from "./fillV4.js";
+import {
+  V4_MAINNET_COINS_PER_UTXO_BYTE,
+  assembleV4Tx,
+  type V4Deployment,
+  type RecipeOutput,
+  type RecipeMintGroup,
+} from "./fillV4.js";
 import type { OutputRef, Credential } from "./datum.js";
 
 // Credential (`{ type: "key" | "script"; hash }`) is re-used from datum.js.
 
-/** Derive a maker's per-user order address = script(orderScriptHash) + stake. */
+function scriptStakeAddress(network: Network, scriptHash: string, stake: Credential): string {
+  return credentialToAddress(
+    network,
+    { type: "Script", hash: scriptHash },
+    { type: stake.type === "key" ? "Key" : "Script", hash: stake.hash },
+  );
+}
+
+/** Derive a maker's per-user one-way order address = script(orderScriptHash) + stake. */
 export function orderAddressFor(
   deployment: Pick<V4Deployment, "orderScriptHash" | "network">,
   stake: Credential,
 ): string {
-  return credentialToAddress(
-    deployment.network,
-    { type: "Script", hash: deployment.orderScriptHash },
-    { type: stake.type === "key" ? "Key" : "Script", hash: stake.hash },
-  );
+  return scriptStakeAddress(deployment.network, deployment.orderScriptHash, stake);
+}
+
+/** Derive a maker's per-user two-way order address = script(twoWayScriptHash) + stake. */
+export function twoWayOrderAddressFor(
+  deployment: Pick<V4Deployment, "twoWayScriptHash" | "network">,
+  stake: Credential,
+): string {
+  if (!deployment.twoWayScriptHash) throw new Error("deployment.twoWayScriptHash required for two-way orders");
+  return scriptStakeAddress(deployment.network, deployment.twoWayScriptHash, stake);
 }
 
 function credToBech32(
@@ -273,7 +292,6 @@ export interface PlanRepriceOrderV4Args {
 /** PURE: recipe to reprice an order in place (net-zero beacons). */
 export function planRepriceOrderV4Tx(args: PlanRepriceOrderV4Args): LifecycleRecipe {
   const { deployment, order } = args;
-  const coinsPerUtxoByte = args.coinsPerUtxoByte ?? V4_MAINNET_COINS_PER_UTXO_BYTE;
   const orderRef = order.utxo;
   const d = order.datum;
 
@@ -316,4 +334,124 @@ export function planRepriceOrderV4Tx(args: PlanRepriceOrderV4Args): LifecycleRec
     requiredStakeKeyHash: args.makerStake.type === "key" ? args.makerStake.hash : undefined,
     validToUnixMs: null,
   };
+}
+
+// ---- thin @lucid-evolution assemblers over the lifecycle planners ----
+
+export interface LifecycleV4Result {
+  unsignedCbor: string;
+  txHash: string;
+  recipe: LifecycleRecipe;
+}
+
+export interface BuildCreateOrderV4Options {
+  lucid: LucidEvolution;
+  deployment: V4Deployment;
+  datum: OrderDatumV4;
+  makerStake: Credential;
+  fundingUtxos: UTxO[];
+  collateralUtxo: UTxO;
+  changeAddress?: string;
+  depositLovelace?: bigint;
+  coinsPerUtxoByte?: bigint;
+}
+
+/** Assemble a create-order tx (mints 3 beacons into the maker's per-user UTxO). */
+export async function buildCreateOrderV4(opts: BuildCreateOrderV4Options): Promise<LifecycleV4Result> {
+  const changeAddress = opts.changeAddress ?? opts.collateralUtxo.address;
+  const recipe = planCreateOrderV4Tx({
+    deployment: opts.deployment,
+    datum: opts.datum,
+    makerStake: opts.makerStake,
+    depositLovelace: opts.depositLovelace,
+    coinsPerUtxoByte: opts.coinsPerUtxoByte,
+  });
+  const { unsignedCbor, txHash } = await assembleV4Tx({
+    lucid: opts.lucid,
+    changeAddress,
+    collateralUtxo: opts.collateralUtxo,
+    fundingUtxos: opts.fundingUtxos,
+    refInputs: recipe.refInputs,
+    outputs: recipe.outputs,
+    mints: recipe.mints,
+    validToUnixMs: recipe.validToUnixMs,
+    requiredStakeKeyHash: recipe.requiredStakeKeyHash,
+  });
+  return { unsignedCbor, txHash, recipe };
+}
+
+export interface BuildCancelOrderV4Options {
+  lucid: LucidEvolution;
+  deployment: V4Deployment;
+  order: { datum: OrderDatumV4; utxo: OutputRef; scriptValue: ChainValue; address: string };
+  makerStake: Credential;
+  fundingUtxos: UTxO[];
+  collateralUtxo: UTxO;
+  changeAddress?: string;
+  coinsPerUtxoByte?: bigint;
+}
+
+/** Assemble a cancel tx (spends the order, burns 3 beacons, reclaims to the owner). */
+export async function buildCancelOrderV4(opts: BuildCancelOrderV4Options): Promise<LifecycleV4Result> {
+  const changeAddress = opts.changeAddress ?? opts.collateralUtxo.address;
+  const recipe = planCancelOrderV4Tx({
+    deployment: opts.deployment,
+    order: opts.order,
+    makerStake: opts.makerStake,
+    fundingInputs: opts.fundingUtxos.map((u) => ({ txHash: u.txHash, outputIndex: u.outputIndex })),
+    coinsPerUtxoByte: opts.coinsPerUtxoByte,
+  });
+  const { unsignedCbor, txHash } = await assembleV4Tx({
+    lucid: opts.lucid,
+    changeAddress,
+    collateralUtxo: opts.collateralUtxo,
+    fundingUtxos: opts.fundingUtxos,
+    refInputs: recipe.refInputs,
+    outputs: recipe.outputs,
+    mints: recipe.mints,
+    validToUnixMs: recipe.validToUnixMs,
+    requiredStakeKeyHash: recipe.requiredStakeKeyHash,
+    spends: [recipe.spend!],
+  });
+  return { unsignedCbor, txHash, recipe };
+}
+
+export interface BuildRepriceOrderV4Options {
+  lucid: LucidEvolution;
+  deployment: V4Deployment;
+  order: { datum: OrderDatumV4; utxo: OutputRef; scriptValue: ChainValue; address: string };
+  makerStake: Credential;
+  newDatum: OrderDatumV4;
+  newValue?: ChainValue;
+  fundingUtxos: UTxO[];
+  collateralUtxo: UTxO;
+  changeAddress?: string;
+  coinsPerUtxoByte?: bigint;
+}
+
+/** Assemble a reprice tx (net-zero beacons; owner-authorized in-place relist). */
+export async function buildRepriceOrderV4(opts: BuildRepriceOrderV4Options): Promise<LifecycleV4Result> {
+  const changeAddress = opts.changeAddress ?? opts.collateralUtxo.address;
+  const recipe = planRepriceOrderV4Tx({
+    deployment: opts.deployment,
+    order: opts.order,
+    makerStake: opts.makerStake,
+    newDatum: opts.newDatum,
+    newValue: opts.newValue,
+    fundingInputs: opts.fundingUtxos.map((u) => ({ txHash: u.txHash, outputIndex: u.outputIndex })),
+    coinsPerUtxoByte: opts.coinsPerUtxoByte,
+  });
+  const { unsignedCbor, txHash } = await assembleV4Tx({
+    lucid: opts.lucid,
+    changeAddress,
+    collateralUtxo: opts.collateralUtxo,
+    fundingUtxos: opts.fundingUtxos,
+    refInputs: recipe.refInputs,
+    outputs: recipe.outputs,
+    mints: recipe.mints,
+    validToUnixMs: recipe.validToUnixMs,
+    requiredStakeKeyHash: recipe.requiredStakeKeyHash,
+    spends: [recipe.spend!],
+  });
+  return { unsignedCbor, txHash, recipe };
 }
