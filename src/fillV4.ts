@@ -31,7 +31,7 @@ import { computeFillPlanV4, type FillPlanV4 } from "./fillPlanV4.js";
 import { pairBeaconName, offerBeaconName, askBeaconName } from "./beaconsV4.js";
 import { plutusToHex } from "./plutus.js";
 import type { ChainValue } from "./discovery.js";
-import { inputIndexOf, sortInputs, type TxIn } from "./sort.js";
+import { inputIndexOf, type TxIn } from "./sort.js";
 import { minUtxoLovelace } from "./minUtxo.js";
 import type { OutputRef } from "./datum.js";
 
@@ -335,8 +335,9 @@ export interface AssembleV4TxArgs {
  * PURE planner has produced the recipe: resolve the reference-script UTxOs (and,
  * for a spend, the order UTxO), attach the redeemer, pay each pre-floored output,
  * apply each mint group, sign-net-zero mint groups skipped, add owner-auth signer,
- * set the ttl, complete, and re-check the order input index against the finalized
- * input sort. Returns the unsigned CBOR the caller signs.
+ * set the ttl, and complete. The redeemer's input_index was derived over the
+ * canonical Conway sort before assembly and is enforced on-chain by
+ * input_at_verified; returns the unsigned CBOR the caller signs.
  */
 export async function assembleV4Tx(args: AssembleV4TxArgs): Promise<{ unsignedCbor: string; txHash: string }> {
   const { lucid } = args;
@@ -373,13 +374,6 @@ export async function assembleV4Tx(args: AssembleV4TxArgs): Promise<{ unsignedCb
 
   const signBuilder = await tx.complete({ changeAddress: args.changeAddress, setCollateral: 5_000_000n });
   const unsignedCbor = signBuilder.toCBOR();
-
-  for (const { orderRef, inputIndex, spendInputs } of spends) {
-    const finalIndex = sortInputs(spendInputs).findIndex(
-      (i) => i.txHash === orderRef.txHash && i.outputIndex === orderRef.outputIndex,
-    );
-    if (finalIndex !== inputIndex) throw new Error(`spend input_index drift: ${inputIndex} vs ${finalIndex}`);
-  }
 
   return { unsignedCbor, txHash: signBuilder.toHash() };
 }
