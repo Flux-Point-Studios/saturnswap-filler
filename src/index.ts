@@ -18,13 +18,17 @@ export * from "./fillV3.js";
 export * from "./cancel.js";
 export { CborReader, CborWriter } from "./cbor.js";
 
-// V4 (CIP-0089 distributed order book): beacon discovery + datum/redeemer
-// codecs + fill/swap planners.
-export * from "./beaconsV4.js";
-export * from "./datumV4.js";
-export * from "./discoveryV4.js";
-export * from "./ratioV4.js";
-export * from "./fillPlanV4.js";
-export * from "./fillV4.js";
-export * from "./lifecycleV4.js";
-export * from "./swapV4.js";
+// Canonical cardano-swaps (fallen-icarus protocol v2, PlutusV2): beacon discovery,
+// SwapDatum/redeemer codecs, taker-fill composable, and the maker lifecycle
+// (create / reprice / cancel via the maker_stake withdraw-0 + ADAM bot signer).
+export * from "./cardanoSwapsBeacons.js";
+export * from "./cardanoSwapsRatio.js";
+export * from "./cardanoSwapsDatum.js";
+export * from "./cardanoSwapsFill.js";
+export * from "./cardanoSwapsLifecycle.js";
+export * from "./cardanoSwapsDiscovery.js";
+
+// Insured swap (tx-cart): compose a V2 cardano-swaps fill + a V3 Aegis
+// underwrite into ONE tx, ONE signature, NO Conway treasury_donation (key 22).
+// Plus the standalone coverage-only 2-tx fallback.
+export * from "./insuredSwap.js";
