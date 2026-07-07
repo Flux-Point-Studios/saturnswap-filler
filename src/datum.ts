@@ -84,7 +84,7 @@ export function outputRefToPlutusData(ref: OutputRef): PlutusData {
   return PConstr(0, [PConstr(0, [PHex(ref.txHash)]), PInt(ref.outputIndex)]);
 }
 
-function plutusDataToOutputRef(d: PlutusData): OutputRef {
+export function plutusDataToOutputRef(d: PlutusData): OutputRef {
   if (d.kind !== "constr" || d.fields.length !== 2) throw new Error("malformed OutputReference");
   const txId = d.fields[0]!;
   if (txId.kind !== "constr" || txId.fields[0]!.kind !== "bytes") throw new Error("malformed TransactionId");
