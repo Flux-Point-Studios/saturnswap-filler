@@ -29,7 +29,7 @@ import type { OutputRef } from "./datum.js";
 import { unit } from "./discovery.js";
 import type { PlutusVersion } from "./contract.js";
 import type { CardanoSwapsComposableResult, ComposableFill } from "./cardanoSwapsFill.js";
-import { MAX_FEED_AGE_MS } from "./aegisFeed.js";
+import { assertFeedUsable } from "./aegisFeed.js";
 
 // ---------------------------------------------------------------------------
 // Structural mirror of aegis-sdk `buildUnderwriteParts` output — the exact
@@ -61,6 +61,9 @@ export interface AegisPoolOutput extends AegisScriptOutput {
 export interface AegisFeeOutput {
   address: string;
   lovelace: bigint;
+  /** V7: set when the team cut targets a script sink (e.g. the cMATRA
+   *  staking_treasury) — a datum-less output there would be stranded. */
+  inlineDatumCbor?: string;
 }
 export interface AegisMintPart {
   policyId: string;
@@ -217,10 +220,20 @@ function aegisOutputs(uw: UnderwriteParts): PlanOutput[] {
       value: assetValue(uw.poolOutput.lovelace, uw.poolOutput.poolNft),
       datumCbor: uw.poolOutput.inlineDatumCbor,
     },
-    { role: "aegis-team", address: uw.teamOutput.address, value: { lovelace: uw.teamOutput.lovelace } },
+    {
+      role: "aegis-team",
+      address: uw.teamOutput.address,
+      value: { lovelace: uw.teamOutput.lovelace },
+      datumCbor: uw.teamOutput.inlineDatumCbor,
+    },
   ];
   if (uw.partnerOutput) {
-    outs.push({ role: "aegis-partner", address: uw.partnerOutput.address, value: { lovelace: uw.partnerOutput.lovelace } });
+    outs.push({
+      role: "aegis-partner",
+      address: uw.partnerOutput.address,
+      value: { lovelace: uw.partnerOutput.lovelace },
+      datumCbor: uw.partnerOutput.inlineDatumCbor,
+    });
   }
   return outs;
 }
@@ -236,8 +249,9 @@ function assertNoDonation(uw: UnderwriteParts): void {
   if (uw.treasuryDonationLovelace !== 0n) {
     throw new Error(
       `underwrite parts carry a non-zero treasury donation (${uw.treasuryDonationLovelace}); ` +
-        "rotate the pool (treasury_share_bps=0) and the SDK so no Conway key-22 is emitted, " +
-        "or the V2 cardano-swaps leg will fail phase-2 (TreasuryDonationFieldNotSupported)",
+        "the V7 composable path omits the Conway key-22 (conditional donation — the treasury cut " +
+        "settles via the SDK's key-witnessed sweep), so a non-zero value means a pre-V7 SDK built " +
+        "these parts and the V2 cardano-swaps leg would fail phase-2 (TreasuryDonationFieldNotSupported)",
     );
   }
 }
@@ -289,40 +303,43 @@ function intersectValidity(
   nowMs: bigint,
   oracle?: OracleAttestationLeg,
 ): { invalidBefore: bigint; invalidHereafter: bigint } {
-  if (oracle && nowMs > oracle.feedValidUntilMs) {
-    throw new Error(
-      `AegisSelf feed expired at ${oracle.feedValidUntilMs} (now ${nowMs}) — ` +
-        "tx_upper <= valid_until is unsatisfiable; wait for the next publish",
-    );
+  // Barrier freshness is a REFUSAL, not a workaround: pool.ak's
+  // tx_lower <= observed_at + 300_000 exists as LP staleness protection, so a
+  // >5-min-old (or expired) feed refuses the build instead of backdating
+  // tx_lower to sneak past the gate. With a fresh feed the default lower bound
+  // (base - margin <= nowMs - margin < observed_at + 300_000) always satisfies
+  // the gate — no clamp needed.
+  if (oracle) {
+    assertFeedUsable({ observedAtMs: oracle.feedObservedAtMs, validUntilMs: oracle.feedValidUntilMs }, nowMs);
   }
 
   const base = uw.validity.startTimeMs < nowMs ? uw.validity.startTimeMs : nowMs;
-  let invalidBefore = base - VALIDITY_LOWER_MARGIN_MS;
-  // pool.ak's Barrier freshness gate: tx_lower <= price.observed_at + 300_000.
-  // An older feed forces the lower bound DOWN to stay inside the gate (a past
-  // lower bound is always node-legal).
-  if (oracle) {
-    const feedLowerCap = oracle.feedObservedAtMs + MAX_FEED_AGE_MS;
-    if (feedLowerCap < invalidBefore) invalidBefore = feedLowerCap;
-  }
+  const invalidBefore = base - VALIDITY_LOWER_MARGIN_MS;
 
-  // ... and its upper leg: tx_upper <= price.valid_until.
+  // pool.ak's upper freshness leg: tx_upper <= price.valid_until.
   let windowUpper = nowMs + VALIDITY_UPPER_WINDOW_MS;
-  if (oracle && oracle.feedValidUntilMs < windowUpper) windowUpper = oracle.feedValidUntilMs;
-  const invalidHereafter =
-    swapExpirationMs != null && swapExpirationMs < windowUpper ? swapExpirationMs : windowUpper;
+  let upperCappedBy = "the 3h window";
+  if (oracle && oracle.feedValidUntilMs < windowUpper) {
+    windowUpper = oracle.feedValidUntilMs;
+    upperCappedBy = `the oracle feed's valid_until (${oracle.feedValidUntilMs})`;
+  }
+  let invalidHereafter = windowUpper;
+  if (swapExpirationMs != null && swapExpirationMs < windowUpper) {
+    invalidHereafter = swapExpirationMs;
+    upperCappedBy = `the order expiration (${swapExpirationMs})`;
+  }
 
   if (invalidHereafter <= invalidBefore) {
     throw new Error(
       `tx validity_upper_bound (${invalidHereafter}) must exceed validity_lower_bound (${invalidBefore}); ` +
-        `the order expiration (${swapExpirationMs}) caps it at/below the lower bound`,
+        `${upperCappedBy} caps it at/below the lower bound`,
     );
   }
   if (invalidHereafter < uw.validity.startTimeMs) {
     throw new Error(
       `tx validity_upper_bound (${invalidHereafter}) must be >= policy.start_time (${uw.validity.startTimeMs}); ` +
         `the pool spend's start_time_in_tx_range requires start_time <= tx.validity_upper_bound, ` +
-        `but the order expiration (${swapExpirationMs}) caps it too early`,
+        `but ${upperCappedBy} caps it too early`,
     );
   }
   return { invalidBefore, invalidHereafter };

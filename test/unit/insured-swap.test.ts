@@ -183,6 +183,27 @@ describe("assembleInsuredSwap — 1-tx V2 swap ⊗ V3 underwrite, NO key 22", ()
     ]);
   });
 
+  it("passes the V7 teamOutput inline datum through (script-sink team cut must not be stranded)", () => {
+    const uw = underwriteParts();
+    uw.teamOutput = { ...uw.teamOutput, inlineDatumCbor: "d8799f2040ff" };
+    const p = assembleInsuredSwap({
+      swap: swapLeg(),
+      underwrite: uw,
+      takerPkh: TAKER,
+      swapReferenceInputs: SWAP_REFS,
+    });
+    const team = p.outputs.find((o) => o.role === "aegis-team")!;
+    expect(team.datumCbor).toBe("d8799f2040ff");
+    // a datum-less team output stays datum-less
+    const bare = assembleInsuredSwap({
+      swap: swapLeg(),
+      underwrite: underwriteParts(),
+      takerPkh: TAKER,
+      swapReferenceInputs: SWAP_REFS,
+    });
+    expect(bare.outputs.find((o) => o.role === "aegis-team")!.datumCbor).toBeUndefined();
+  });
+
   it("upper bound is nowMs + VALIDITY_UPPER_WINDOW_MS (short window), capped by a nearer order expiration", () => {
     const NOW = START + 1_000_000n; // after policy start, far below the 30-day expiry
     const p = assembleInsuredSwap({
@@ -462,23 +483,23 @@ describe("Barrier — oracle attestation leg", () => {
     expect(() => assertComposable(plan)).not.toThrow();
   });
 
-  it("clamps validity_lower_bound to observed_at + 300s for an older feed (tx_lower gate)", () => {
-    // feed observed ~33 min ago: observed_at + 300s sits BELOW the default lower
-    // bound (start − margin), so tx_lower must clamp down to stay inside the gate.
+  it("REFUSES a feed older than the 5-min pool.ak tx_lower gate (LP staleness protection, no backdating)", () => {
+    // feed observed ~33 min ago: refusing (not backdating tx_lower) preserves
+    // the on-chain staleness control on the honest path.
     const leg = oracleLeg(NOW, 2_000_000n);
-    const plan = assembleInsuredSwap({
-      swap: swapLeg(),
-      underwrite: barrierParts(),
-      takerPkh: TAKER,
-      swapReferenceInputs: SWAP_REFS,
-      nowMs: NOW,
-      oracle: leg,
-    });
-    expect(plan.validity.invalidBefore).toBe(leg.feedObservedAtMs + 300_000n);
-    expect(plan.validity.invalidBefore <= leg.feedObservedAtMs + 300_000n).toBe(true);
+    expect(() =>
+      assembleInsuredSwap({
+        swap: swapLeg(),
+        underwrite: barrierParts(),
+        takerPkh: TAKER,
+        swapReferenceInputs: SWAP_REFS,
+        nowMs: NOW,
+        oracle: leg,
+      }),
+    ).toThrow(/stale/i);
   });
 
-  it("keeps the normal lower bound when the feed is fresh (no unnecessary clamp)", () => {
+  it("keeps the normal lower bound when the feed is fresh (the default already satisfies the tx_lower gate)", () => {
     const plan = assembleInsuredSwap({
       swap: swapLeg(),
       underwrite: barrierParts(),
@@ -488,11 +509,13 @@ describe("Barrier — oracle attestation leg", () => {
       oracle: oracleLeg(NOW, 60_000n),
     });
     expect(plan.validity.invalidBefore).toBe(START - VALIDITY_LOWER_MARGIN_MS);
+    // the fresh-feed invariant: lower bound sits inside the tx_lower gate
+    expect(plan.validity.invalidBefore <= NOW - 60_000n + 300_000n).toBe(true);
   });
 
-  it("caps validity_upper_bound at the feed's valid_until (tx_upper gate)", () => {
-    // feed expires 10 min from now — well inside the 3h window.
-    const leg = oracleLeg(NOW, 3_600_000n, 4_200_000n); // observed 1h ago, expires in 10min
+  it("caps validity_upper_bound at the feed's valid_until (tx_upper gate) and names the cap in errors", () => {
+    // fresh feed with a short validity window: expires 14 min from now.
+    const leg = oracleLeg(NOW, 60_000n, 900_000n);
     const plan = assembleCoverageOnly({
       underwrite: barrierParts(),
       takerPkh: TAKER,
@@ -501,6 +524,21 @@ describe("Barrier — oracle attestation leg", () => {
     });
     expect(plan.validity.invalidHereafter).toBe(leg.feedValidUntilMs);
     expect(plan.withdrawals).toEqual([{ scriptHash: OBSERVER_HASH, redeemerCbor: ATTESTATION_CBOR }]);
+  });
+
+  it("names the FEED (not the order expiration) when the feed's valid_until refuses a future-pinned start", () => {
+    // coverage start pinned beyond the feed window → correct refusal, and the
+    // error must blame the feed's valid_until, never 'order expiration (undefined)'.
+    const parts = barrierParts();
+    parts.validity = { startTimeMs: NOW + 2n * 3_600_000n, expiryTimeMs: NOW + 30n * 86_400_000n };
+    expect(() =>
+      assembleCoverageOnly({
+        underwrite: parts,
+        takerPkh: TAKER,
+        nowMs: NOW,
+        oracle: oracleLeg(NOW, 60_000n, 900_000n),
+      }),
+    ).toThrow(/oracle feed's valid_until/);
   });
 
   it("REFUSES an expired feed (upper clamp collapses the validity window)", () => {

@@ -32,3 +32,8 @@ export * from "./cardanoSwapsDiscovery.js";
 // underwrite into ONE tx, ONE signature, NO Conway treasury_donation (key 22).
 // Plus the standalone coverage-only 2-tx fallback.
 export * from "./insuredSwap.js";
+
+// Mainnet wiring: the 2026-07-08 ceremony manifest + Aegis V7 coverage
+// constants, and AegisSelf rotating-feed discovery / observer attestation.
+export * from "./cardanoSwapsMainnet.js";
+export * from "./aegisFeed.js";

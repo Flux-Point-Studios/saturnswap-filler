@@ -14,15 +14,15 @@
 // strict ==). Freshness stays consumer-side: pool.ak's Barrier arm requires
 //   tx_lower <= price.observed_at + 300_000 && tx_upper <= price.valid_until.
 
+import { getAddressDetails } from "@lucid-evolution/lucid";
 import type { OutputRef } from "./datum.js";
 import { PConstr, PHex, PInt, plutusToHex, decodePlutusHex, type PlutusData } from "./plutus.js";
 import { AEGIS_V7_MAINNET } from "./cardanoSwapsMainnet.js";
 
-/** pool.ak Barrier freshness: tx_lower <= observed_at + 300_000. */
+/** pool.ak Barrier freshness: tx_lower <= observed_at + 300_000. The reference
+ *  off-chain refuses feeds older than this pre-flight (LP staleness protection)
+ *  — so do we. */
 export const MAX_FEED_AGE_MS = 300_000n;
-
-/** The feed marker asset name — "AEGIS_P". */
-export const AEGIS_FEED_ASSET_NAME_HEX = "41454749535f50";
 
 export interface AegisFeedPrice {
   priceScaled: bigint;
@@ -64,9 +64,13 @@ export function decodeAegisFeedDatum(datumHex: string): AegisFeedPrice {
   if (inner.kind !== "constr" || inner.alt !== 2 || inner.fields.length !== 1 || inner.fields[0]!.kind !== "map") {
     throw new Error("not an AegisSelf feed datum: expected Constr2[price map] inside Constr0");
   }
+  // Mirror the on-chain parser exactly: keys are strictly Ints (an OracleDatum
+  // with a non-Int key fails its `expect`), and a duplicate key resolves to the
+  // FIRST occurrence (pairs.get_first).
   const entries = new Map<bigint, PlutusData>();
   for (const [k, v] of inner.fields[0]!.entries) {
-    if (k.kind === "int") entries.set(k.value, v);
+    if (k.kind !== "int") throw new Error("not an AegisSelf feed datum: non-Int price-map key");
+    if (!entries.has(k.value)) entries.set(k.value, v);
   }
   const priceScaled = expectInt(entries.get(0n), "price (key 0)");
   const observedAtMs = expectInt(entries.get(1n), "observed_at (key 1)");
@@ -77,19 +81,24 @@ export function decodeAegisFeedDatum(datumHex: string): AegisFeedPrice {
 }
 
 /** Find the live feed UTxO for a feed-NFT policy among the publisher's UTxOs.
- *  Rejects a marker sitting away from the canonical publisher address — the
- *  same two-layer pin (policy + publisher) the on-chain parser enforces. */
+ *  Mirrors the on-chain parser's two-layer pin exactly: ANY token under the
+ *  feed policy (the validator gates on policy-id membership only — each feed
+ *  policy is a one-shot mint, so exactly one token exists) at a payment
+ *  credential equal to the publisher VKH. */
 export function findLiveAegisFeed(
   utxos: FeedUtxoView[],
   feedPolicyId: string,
-  publisherAddress: string = AEGIS_V7_MAINNET.publisher.address,
+  publisherVkh: string = AEGIS_V7_MAINNET.publisher.vkh,
 ): AegisFeedReading {
-  const markerUnit = feedPolicyId + AEGIS_FEED_ASSET_NAME_HEX;
-  const carriers = utxos.filter((u) => (u.assets[markerUnit] ?? 0n) > 0n);
+  const carriers = utxos.filter((u) =>
+    Object.entries(u.assets).some(([asset, qty]) => asset.startsWith(feedPolicyId) && qty > 0n),
+  );
   if (carriers.length === 0) throw new Error(`AegisSelf feed not found for policy ${feedPolicyId}`);
-  const atPublisher = carriers.find((u) => u.address === publisherAddress);
+  const atPublisher = carriers.find(
+    (u) => getAddressDetails(u.address).paymentCredential?.hash === publisherVkh,
+  );
   if (!atPublisher) {
-    throw new Error(`AegisSelf feed marker for ${feedPolicyId} is not at the canonical publisher address`);
+    throw new Error(`AegisSelf feed marker for ${feedPolicyId} is not at the canonical publisher credential`);
   }
   if (!atPublisher.datumHex) throw new Error("AegisSelf feed UTxO has no inline datum");
   return {
@@ -99,11 +108,23 @@ export function findLiveAegisFeed(
   };
 }
 
-/** Throw once the reading expired — tx_upper <= valid_until is unsatisfiable. */
-export function assertFeedUsable(feed: AegisFeedPrice, nowMs: bigint): void {
+/** Throw when the reading is unusable for a Barrier underwrite: EXPIRED
+ *  (tx_upper <= valid_until unsatisfiable) or STALE (older than the 5-min
+ *  pool.ak tx_lower gate — the LP staleness protection; do not work around it
+ *  by backdating tx_lower). */
+export function assertFeedUsable(
+  feed: { observedAtMs: bigint; validUntilMs: bigint },
+  nowMs: bigint,
+): void {
   if (nowMs > feed.validUntilMs) {
     throw new Error(
       `AegisSelf feed expired at ${feed.validUntilMs} (now ${nowMs}) — wait for the next publish before underwriting`,
+    );
+  }
+  if (nowMs > feed.observedAtMs + MAX_FEED_AGE_MS) {
+    throw new Error(
+      `AegisSelf feed is stale: observed at ${feed.observedAtMs}, now ${nowMs} (max age ${MAX_FEED_AGE_MS}ms) — ` +
+        "wait for the next publish before underwriting",
     );
   }
 }
