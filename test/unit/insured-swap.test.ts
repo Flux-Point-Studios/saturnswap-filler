@@ -89,7 +89,8 @@ function underwriteParts(donation: bigint = 0n, withPartner = false): Underwrite
     references: {
       poolValidator: { txHash: "ee".repeat(32), index: 0 },
       marker: { txHash: "ef".repeat(32), index: 0 },
-      oracleRequired: true,
+      // Depeg/Shielded-class fixture — Barrier (oracleRequired) has its own block below.
+      oracleRequired: false,
     },
     validity: { startTimeMs: START, expiryTimeMs: EXPIRY },
   };
@@ -150,7 +151,8 @@ describe("assembleInsuredSwap — 1-tx V2 swap ⊗ V3 underwrite, NO key 22", ()
       { txHash: "ee".repeat(32), outputIndex: 0 },
       { txHash: "ef".repeat(32), outputIndex: 0 },
     ]);
-    expect(plan.oracleRequired).toBe(true);
+    expect(plan.oracleRequired).toBe(false);
+    expect(plan.withdrawals).toEqual([]);
   });
 
   it("passes the V2⊗V3 composability gate", () => {
@@ -179,6 +181,27 @@ describe("assembleInsuredSwap — 1-tx V2 swap ⊗ V3 underwrite, NO key 22", ()
       "aegis-team",
       "aegis-partner",
     ]);
+  });
+
+  it("passes the V7 teamOutput inline datum through (script-sink team cut must not be stranded)", () => {
+    const uw = underwriteParts();
+    uw.teamOutput = { ...uw.teamOutput, inlineDatumCbor: "d8799f2040ff" };
+    const p = assembleInsuredSwap({
+      swap: swapLeg(),
+      underwrite: uw,
+      takerPkh: TAKER,
+      swapReferenceInputs: SWAP_REFS,
+    });
+    const team = p.outputs.find((o) => o.role === "aegis-team")!;
+    expect(team.datumCbor).toBe("d8799f2040ff");
+    // a datum-less team output stays datum-less
+    const bare = assembleInsuredSwap({
+      swap: swapLeg(),
+      underwrite: underwriteParts(),
+      takerPkh: TAKER,
+      swapReferenceInputs: SWAP_REFS,
+    });
+    expect(bare.outputs.find((o) => o.role === "aegis-team")!.datumCbor).toBeUndefined();
   });
 
   it("upper bound is nowMs + VALIDITY_UPPER_WINDOW_MS (short window), capped by a nearer order expiration", () => {
@@ -396,5 +419,157 @@ describe("assembleCoverageOnly — the 2-tx fallback still works", () => {
 
   it("is NOT a 1-tx insured swap (assertComposable rejects it — no V2 leg)", () => {
     expect(() => assertComposable(plan)).toThrow(/BOTH a V2 swap spend and a V3 underwrite/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Barrier (oracleRequired) — the underwrite must carry the AegisSelf feed as a
+// read-only reference input AND the oracle_observer's withdraw-0 attestation.
+// pool.ak's Barrier arm then enforces freshness:
+//   tx_lower <= price.observed_at + 300_000 && tx_upper <= price.valid_until
+// ---------------------------------------------------------------------------
+
+const OBSERVER_HASH = "669d5a25489c00aab367c3b9b71630efd523623ca13bbe0e1bd59752";
+const FEED_REF: OutputRef = { txHash: "0e".repeat(32), outputIndex: 0 };
+const OBSERVER_REF: OutputRef = { txHash: "0b".repeat(32), outputIndex: 0 };
+const ATTESTATION_CBOR = "9fd8799fd87b9f".padEnd(40, "0") + "ff"; // opaque to the assembler
+
+function barrierParts(): UnderwriteParts {
+  const p = underwriteParts();
+  p.references = { ...p.references, oracleRequired: true };
+  return p;
+}
+
+function oracleLeg(nowMs: bigint, observedAgoMs = 60_000n, validForMs = 4_200_000n) {
+  const observed = nowMs - observedAgoMs;
+  return {
+    feedRefUtxo: FEED_REF,
+    observerScriptHash: OBSERVER_HASH,
+    observerRefUtxo: OBSERVER_REF,
+    attestationRedeemerCbor: ATTESTATION_CBOR,
+    feedObservedAtMs: observed,
+    feedValidUntilMs: observed + validForMs,
+  };
+}
+
+describe("Barrier — oracle attestation leg", () => {
+  const NOW = START + 1_000_000n;
+
+  it("FAIL-CLOSED: refuses a Barrier underwrite without the oracle leg (both assemblers)", () => {
+    expect(() =>
+      assembleInsuredSwap({ swap: swapLeg(), underwrite: barrierParts(), takerPkh: TAKER, swapReferenceInputs: SWAP_REFS, nowMs: NOW }),
+    ).toThrow(/oracle/i);
+    expect(() => assembleCoverageOnly({ underwrite: barrierParts(), takerPkh: TAKER, nowMs: NOW })).toThrow(/oracle/i);
+  });
+
+  it("attaches the feed + observer refs and the observer withdraw-0 attestation", () => {
+    const plan = assembleInsuredSwap({
+      swap: swapLeg(),
+      underwrite: barrierParts(),
+      takerPkh: TAKER,
+      swapReferenceInputs: SWAP_REFS,
+      nowMs: NOW,
+      oracle: oracleLeg(NOW),
+    });
+    expect(plan.oracleRequired).toBe(true);
+    expect(plan.withdrawals).toEqual([{ scriptHash: OBSERVER_HASH, redeemerCbor: ATTESTATION_CBOR }]);
+    expect(plan.referenceInputs).toEqual([
+      ...SWAP_REFS,
+      { txHash: "ee".repeat(32), outputIndex: 0 },
+      { txHash: "ef".repeat(32), outputIndex: 0 },
+      FEED_REF,
+      OBSERVER_REF,
+    ]);
+    expect(() => assertComposable(plan)).not.toThrow();
+  });
+
+  it("REFUSES a feed older than the 5-min pool.ak tx_lower gate (LP staleness protection, no backdating)", () => {
+    // feed observed ~33 min ago: refusing (not backdating tx_lower) preserves
+    // the on-chain staleness control on the honest path.
+    const leg = oracleLeg(NOW, 2_000_000n);
+    expect(() =>
+      assembleInsuredSwap({
+        swap: swapLeg(),
+        underwrite: barrierParts(),
+        takerPkh: TAKER,
+        swapReferenceInputs: SWAP_REFS,
+        nowMs: NOW,
+        oracle: leg,
+      }),
+    ).toThrow(/stale/i);
+  });
+
+  it("keeps the normal lower bound when the feed is fresh (the default already satisfies the tx_lower gate)", () => {
+    const plan = assembleInsuredSwap({
+      swap: swapLeg(),
+      underwrite: barrierParts(),
+      takerPkh: TAKER,
+      swapReferenceInputs: SWAP_REFS,
+      nowMs: NOW,
+      oracle: oracleLeg(NOW, 60_000n),
+    });
+    expect(plan.validity.invalidBefore).toBe(START - VALIDITY_LOWER_MARGIN_MS);
+    // the fresh-feed invariant: lower bound sits inside the tx_lower gate
+    expect(plan.validity.invalidBefore <= NOW - 60_000n + 300_000n).toBe(true);
+  });
+
+  it("caps validity_upper_bound at the feed's valid_until (tx_upper gate) and names the cap in errors", () => {
+    // fresh feed with a short validity window: expires 14 min from now.
+    const leg = oracleLeg(NOW, 60_000n, 900_000n);
+    const plan = assembleCoverageOnly({
+      underwrite: barrierParts(),
+      takerPkh: TAKER,
+      nowMs: NOW,
+      oracle: leg,
+    });
+    expect(plan.validity.invalidHereafter).toBe(leg.feedValidUntilMs);
+    expect(plan.withdrawals).toEqual([{ scriptHash: OBSERVER_HASH, redeemerCbor: ATTESTATION_CBOR }]);
+  });
+
+  it("names the FEED (not the order expiration) when the feed's valid_until refuses a future-pinned start", () => {
+    // coverage start pinned beyond the feed window → correct refusal, and the
+    // error must blame the feed's valid_until, never 'order expiration (undefined)'.
+    const parts = barrierParts();
+    parts.validity = { startTimeMs: NOW + 2n * 3_600_000n, expiryTimeMs: NOW + 30n * 86_400_000n };
+    expect(() =>
+      assembleCoverageOnly({
+        underwrite: parts,
+        takerPkh: TAKER,
+        nowMs: NOW,
+        oracle: oracleLeg(NOW, 60_000n, 900_000n),
+      }),
+    ).toThrow(/oracle feed's valid_until/);
+  });
+
+  it("REFUSES an expired feed (upper clamp collapses the validity window)", () => {
+    const leg = oracleLeg(NOW, 4_300_000n, 4_200_000n); // valid_until already passed
+    expect(() =>
+      assembleCoverageOnly({ underwrite: barrierParts(), takerPkh: TAKER, nowMs: NOW, oracle: leg }),
+    ).toThrow(/exceed|expired/i);
+  });
+
+  it("assertComposable rejects a Barrier plan whose observer withdrawal was stripped", () => {
+    const plan = assembleInsuredSwap({
+      swap: swapLeg(),
+      underwrite: barrierParts(),
+      takerPkh: TAKER,
+      swapReferenceInputs: SWAP_REFS,
+      nowMs: NOW,
+      oracle: oracleLeg(NOW),
+    });
+    const stripped = { ...plan, withdrawals: [] };
+    expect(() => assertComposable(stripped)).toThrow(/observer|oracle/i);
+  });
+
+  it("a non-Barrier plan carries no withdrawals and needs no oracle leg", () => {
+    const plan = assembleInsuredSwap({
+      swap: swapLeg(),
+      underwrite: underwriteParts(),
+      takerPkh: TAKER,
+      swapReferenceInputs: SWAP_REFS,
+      nowMs: NOW,
+    });
+    expect(plan.oracleRequired).toBe(false);
+    expect(plan.withdrawals).toEqual([]);
   });
 });
