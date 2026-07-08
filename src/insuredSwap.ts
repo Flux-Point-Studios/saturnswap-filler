@@ -5,10 +5,12 @@
 // WHY key 22 must be absent: the Conway ledger builds a separate script context
 // per Plutus version. PlutusV2's TxInfo has no field for treasury_donation, so
 // the mere presence of key 22 in the body fails the V2 context build and every
-// V2 script fails phase-2 (TreasuryDonationFieldNotSupported). Aegis's pool
-// validator is rotated with treasury_share_bps = 0 (required_donation == 0), so
-// the underwrite owes no donation and this assembler emits none — the V2 swap
-// fill and the V3 underwrite then each validate against their own context.
+// V2 script fails phase-2 (TreasuryDonationFieldNotSupported). Aegis V7 keeps
+// treasury_share_bps = 2500 but its donation_ok accepts an ABSENT key-22 (the
+// CONDITIONAL donation), so the composable path owes no tx-level donation and
+// this assembler emits none — the V2 swap fill and the V3 underwrite then each
+// validate against their own context. The treasury cut settles later via the
+// SDK's key-witnessed sweep path, never inside a composed tx.
 //
 // COMPOSE, DON'T COUPLE: nothing on chain links the two legs. The Aegis policy
 // is bound to the POOL UTxO (derivePolicyId keys off the pool OutputReference),
@@ -27,6 +29,7 @@ import type { OutputRef } from "./datum.js";
 import { unit } from "./discovery.js";
 import type { PlutusVersion } from "./contract.js";
 import type { CardanoSwapsComposableResult, ComposableFill } from "./cardanoSwapsFill.js";
+import { MAX_FEED_AGE_MS } from "./aegisFeed.js";
 
 // ---------------------------------------------------------------------------
 // Structural mirror of aegis-sdk `buildUnderwriteParts` output — the exact
@@ -109,11 +112,36 @@ export interface PlanMint {
   redeemerCbor: string;
 }
 
+/** A 0-lovelace staking-script withdrawal (the withdraw-0 trick). */
+export interface PlanWithdrawal {
+  scriptHash: string;
+  redeemerCbor: string;
+}
+
+/** The oracle leg a Barrier-class underwrite must carry: the live AegisSelf
+ *  feed as a read-only reference input plus the oracle_observer's withdraw-0
+ *  attestation. Build the redeemer with `encodeObserverAttestations` from the
+ *  reading returned by `findLiveAegisFeed`. */
+export interface OracleAttestationLeg {
+  /** The LIVE feed UTxO — rotates every publish; discover at build time. */
+  feedRefUtxo: OutputRef;
+  observerScriptHash: string;
+  /** The observer's CIP-33 ref-script UTxO. */
+  observerRefUtxo: OutputRef;
+  /** List<Attestation> echoing the feed's Price byte-for-byte. */
+  attestationRedeemerCbor: string;
+  /** From the feed datum — drive the freshness clamps below. */
+  feedObservedAtMs: bigint;
+  feedValidUntilMs: bigint;
+}
+
 export interface InsuredSwapPlan {
   spends: PlanSpend[];
   mints: PlanMint[];
   outputs: PlanOutput[];
   referenceInputs: OutputRef[];
+  /** Observer withdraw-0 for Barrier plans; empty otherwise. */
+  withdrawals: PlanWithdrawal[];
   /** Exactly ONE — the taker's CIP-30 key. Canonical fills are taker-signed and
    *  the Aegis pool spend needs no maker signature. */
   requiredSigners: string[];
@@ -220,6 +248,25 @@ function assertTakerPkh(takerPkh: string): void {
   }
 }
 
+/** Fail-closed oracle gate: a Barrier underwrite without its attestation leg
+ *  would fail phase-2 anyway (pool.ak reads attested_price) — refuse off-chain. */
+function oracleLegs(
+  uw: UnderwriteParts,
+  oracle: OracleAttestationLeg | undefined,
+): { refs: OutputRef[]; withdrawals: PlanWithdrawal[] } {
+  if (uw.references.oracleRequired && !oracle) {
+    throw new Error(
+      "Barrier underwrite requires the oracle attestation leg (live AegisSelf feed reference + " +
+        "oracle_observer withdraw-0) — build it with findLiveAegisFeed + encodeObserverAttestations",
+    );
+  }
+  if (!oracle) return { refs: [], withdrawals: [] };
+  return {
+    refs: [oracle.feedRefUtxo, oracle.observerRefUtxo],
+    withdrawals: [{ scriptHash: oracle.observerScriptHash, redeemerCbor: oracle.attestationRedeemerCbor }],
+  };
+}
+
 /** The tx validity range. NOTE: this is the TX validity window, NOT the coverage
  *  term — the coverage start/expiry lives in the PolicyDatum and is enforced
  *  there, never via the tx validity range.
@@ -240,11 +287,28 @@ function intersectValidity(
   uw: UnderwriteParts,
   swapExpirationMs: bigint | null | undefined,
   nowMs: bigint,
+  oracle?: OracleAttestationLeg,
 ): { invalidBefore: bigint; invalidHereafter: bigint } {
-  const base = uw.validity.startTimeMs < nowMs ? uw.validity.startTimeMs : nowMs;
-  const invalidBefore = base - VALIDITY_LOWER_MARGIN_MS;
+  if (oracle && nowMs > oracle.feedValidUntilMs) {
+    throw new Error(
+      `AegisSelf feed expired at ${oracle.feedValidUntilMs} (now ${nowMs}) — ` +
+        "tx_upper <= valid_until is unsatisfiable; wait for the next publish",
+    );
+  }
 
-  const windowUpper = nowMs + VALIDITY_UPPER_WINDOW_MS;
+  const base = uw.validity.startTimeMs < nowMs ? uw.validity.startTimeMs : nowMs;
+  let invalidBefore = base - VALIDITY_LOWER_MARGIN_MS;
+  // pool.ak's Barrier freshness gate: tx_lower <= price.observed_at + 300_000.
+  // An older feed forces the lower bound DOWN to stay inside the gate (a past
+  // lower bound is always node-legal).
+  if (oracle) {
+    const feedLowerCap = oracle.feedObservedAtMs + MAX_FEED_AGE_MS;
+    if (feedLowerCap < invalidBefore) invalidBefore = feedLowerCap;
+  }
+
+  // ... and its upper leg: tx_upper <= price.valid_until.
+  let windowUpper = nowMs + VALIDITY_UPPER_WINDOW_MS;
+  if (oracle && oracle.feedValidUntilMs < windowUpper) windowUpper = oracle.feedValidUntilMs;
   const invalidHereafter =
     swapExpirationMs != null && swapExpirationMs < windowUpper ? swapExpirationMs : windowUpper;
 
@@ -284,6 +348,8 @@ export interface AssembleInsuredSwapArgs {
    *  derive from one clock read — never two divergent `Date.now()`s (the 5b
    *  crash). Defaults to a single Date.now() captured at the top of the build. */
   nowMs?: bigint;
+  /** REQUIRED for Barrier-class parts (references.oracleRequired). */
+  oracle?: OracleAttestationLeg;
 }
 
 /**
@@ -296,6 +362,7 @@ export function assembleInsuredSwap(args: AssembleInsuredSwapArgs): InsuredSwapP
   const nowMs = args.nowMs ?? BigInt(Date.now());
   assertNoDonation(uw);
   assertTakerPkh(takerPkh);
+  const oracle = oracleLegs(uw, args.oracle);
 
   const swapFill = swap.fill;
   const swapOutput = swapFill.outputs[0];
@@ -327,9 +394,10 @@ export function assembleInsuredSwap(args: AssembleInsuredSwapArgs): InsuredSwapP
     spends,
     mints: [{ ...uw.mint }],
     outputs,
-    referenceInputs: [...swapReferenceInputs, ...aegisReferenceInputs(uw)],
+    referenceInputs: [...swapReferenceInputs, ...aegisReferenceInputs(uw), ...oracle.refs],
+    withdrawals: oracle.withdrawals,
     requiredSigners: [takerPkh],
-    validity: intersectValidity(uw, swapExpirationMs, nowMs),
+    validity: intersectValidity(uw, swapExpirationMs, nowMs, args.oracle),
     treasuryDonation: null,
     plutusVersions: ["v2", "v3"],
     oracleRequired: uw.references.oracleRequired,
@@ -343,6 +411,8 @@ export interface AssembleCoverageOnlyArgs {
   /** The SINGLE wall-clock now (ms) — thread the same value passed to the SDK's
    *  `buildUnderwriteParts`. See AssembleInsuredSwapArgs.nowMs. */
   nowMs?: bigint;
+  /** REQUIRED for Barrier-class parts (references.oracleRequired). */
+  oracle?: OracleAttestationLeg;
 }
 
 /**
@@ -355,6 +425,7 @@ export function assembleCoverageOnly(args: AssembleCoverageOnlyArgs): InsuredSwa
   const nowMs = args.nowMs ?? BigInt(Date.now());
   assertNoDonation(uw);
   assertTakerPkh(takerPkh);
+  const oracle = oracleLegs(uw, args.oracle);
 
   return {
     spends: [
@@ -367,9 +438,10 @@ export function assembleCoverageOnly(args: AssembleCoverageOnlyArgs): InsuredSwa
     ],
     mints: [{ ...uw.mint }],
     outputs: aegisOutputs(uw),
-    referenceInputs: aegisReferenceInputs(uw),
+    referenceInputs: [...aegisReferenceInputs(uw), ...oracle.refs],
+    withdrawals: oracle.withdrawals,
     requiredSigners: [takerPkh],
-    validity: intersectValidity(uw, swapExpirationMs, nowMs),
+    validity: intersectValidity(uw, swapExpirationMs, nowMs, args.oracle),
     treasuryDonation: null,
     plutusVersions: ["v3"],
     oracleRequired: uw.references.oracleRequired,
@@ -394,6 +466,9 @@ export function assertComposable(plan: InsuredSwapPlan): void {
   }
   if (!plan.plutusVersions.includes("v2") || !plan.plutusVersions.includes("v3")) {
     throw new Error("a 1-tx insured swap must contain BOTH a V2 swap spend and a V3 underwrite");
+  }
+  if (plan.oracleRequired && plan.withdrawals.length === 0) {
+    throw new Error("a Barrier (oracleRequired) plan must carry the oracle_observer withdraw-0 attestation");
   }
   const swap = plan.spends.find((s) => s.role === "cardano-swaps-fill");
   const uw = plan.spends.find((s) => s.role === "aegis-underwrite");

@@ -55,6 +55,9 @@ export interface CardanoSwapsDeployment {
   spendRefUtxo: OutputRef;
   /** reference-script UTxO carrying the beacon policy/staking script */
   beaconRefUtxo: OutputRef;
+  /** reference-script UTxO carrying maker_stake (CIP-33). When set, reprice/
+   *  cancel recipes reference it instead of relying on an inline attach. */
+  makerStakeRefUtxo?: OutputRef;
 }
 
 // ---- recipe shape ----
@@ -130,6 +133,14 @@ function oneWayBeaconNames(offer: AssetClass, ask: AssetClass): { pair: string; 
     offer: offerBeacon(offer.policyId, offer.assetName),
     ask: askBeacon(ask.policyId, ask.assetName),
   };
+}
+
+/** refInputs for recipes that execute maker_stake withdraw-0: the spend + beacon
+ *  refs, plus the maker_stake ref script when the deployment publishes one. */
+function makerStakeRefInputs(deployment: CardanoSwapsDeployment): OutputRef[] {
+  const refs = [deployment.spendRefUtxo, deployment.beaconRefUtxo];
+  if (deployment.makerStakeRefUtxo) refs.push(deployment.makerStakeRefUtxo);
+  return refs;
 }
 
 // ---- create ----
@@ -252,7 +263,7 @@ export function planRepriceOneWaySwap(args: PlanRepriceOneWaySwapArgs): CardanoS
     ],
     spends: [{ orderRef: order.utxo, redeemerHex: SPEND_WITH_STAKE_HEX }],
     requiredSigners: [deployment.adamBotPkh],
-    refInputs: [deployment.spendRefUtxo, deployment.beaconRefUtxo],
+    refInputs: makerStakeRefInputs(deployment),
     validToUnixMs: expiration !== null ? Number(expiration) : null,
   };
 }
@@ -307,7 +318,7 @@ export function planCancelOneWaySwap(args: PlanCancelOneWaySwapArgs): CardanoSwa
     withdrawals: [{ stakeScriptHash: deployment.makerStakeHash, redeemerHex: MAKER_STAKE_REDEEMER_HEX }],
     spends: [{ orderRef: order.utxo, redeemerHex: SPEND_WITH_MINT_HEX }],
     requiredSigners: [deployment.adamBotPkh],
-    refInputs: [deployment.spendRefUtxo, deployment.beaconRefUtxo],
+    refInputs: makerStakeRefInputs(deployment),
     validToUnixMs: null,
   };
 }
