@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { credentialToRewardAddress } from "@lucid-evolution/lucid";
+import { credentialToAddress, credentialToRewardAddress } from "@lucid-evolution/lucid";
 import {
   CARDANO_SWAPS_MAINNET,
   MAKER_STAKE_REWARD_ADDRESS_MAINNET,
@@ -53,31 +53,55 @@ describe("CARDANO_SWAPS_MAINNET — the ceremony manifest as a typed constant", 
   });
 });
 
-describe("AEGIS_V7_MAINNET — chain-verified V7 coverage constants", () => {
+// ROTATED pool family (redeployed 2026-07-10; the prior observer embedded the
+// preprod publisher VKH). Every value verified on Blockfrost mainnet against the
+// Barrier underwrite proof tx 17b64a52fd5531ee9f73c104f7f5b34c1e4de7cc25d0ae017acb8b4e66ff13ef.
+describe("AEGIS_V7_MAINNET — chain-verified rotated V7 coverage constants", () => {
   it("pins the pool family hashes + ref UTxOs", () => {
-    expect(AEGIS_V7_MAINNET.poolValidatorHash).toBe("4aad412f98302e6aa5aa5c27bf003cbe20361ab276fba919bfacd502");
-    expect(AEGIS_V7_MAINNET.poolAddress).toBe("addr1w9926sf0nqczu6494fwz00cq8jlzqds6kfm0h2geh7kd2qs70dmj2");
-    expect(AEGIS_V7_MAINNET.poolNftPolicyId).toBe("a48f89cf5a52226a2f8226b1af033507594ded136031575a3b028154");
-    expect(AEGIS_V7_MAINNET.markerPolicyId).toBe("f3247570b5bb33abadfbba2fc6e9b9d4918194b9b4146debcf88ab3e");
+    expect(AEGIS_V7_MAINNET.poolValidatorHash).toBe("cca5c1f2c6195cffe1b82b531417be423b0a3f91b7e741e03cbc6cff");
+    expect(AEGIS_V7_MAINNET.poolAddress).toBe("addr1w8x2ts0jccv4ellphq44x9qhheprkz3ljxm7ws0q8j7xelcj85sg4");
+    expect(AEGIS_V7_MAINNET.poolNftPolicyId).toBe("9cf48b68374e539babe1bd583151868d031c37a83443ee58b8b2571a");
+    // AEGIS_POOL_V7 — asset name unchanged across the rotation.
+    expect(AEGIS_V7_MAINNET.poolNftAssetNameHex).toBe("41454749535f504f4f4c5f5637");
+    expect(AEGIS_V7_MAINNET.policyValidatorHash).toBe("f2557118860f37dfd6b3fa4a7c5f1a593761d3e1391418efaeb8cf2c");
+    expect(AEGIS_V7_MAINNET.markerPolicyId).toBe("7778a648610ee4e87004c867fd40c277d159139d635453fce270f0ab");
+    expect(AEGIS_V7_MAINNET.lpTokenPolicyId).toBe("ad155127c7022f435ec0b1be0992de0f72200c9a120f91a70fba2656");
     expect(AEGIS_V7_MAINNET.refs.poolValidator).toEqual({
-      txHash: "fff6be5a24fe27198ae3646335367d29a4d6e480b842939bbc3d66d66d56b34e",
+      txHash: "971bd46c6c97372dde752eb4222afbc237278de8d39a6efd4af85ac1933d487f",
+      outputIndex: 0,
+    });
+    expect(AEGIS_V7_MAINNET.refs.policyValidator).toEqual({
+      txHash: "97e95a829240c7ea5612f6aa353fc0efe3e93776c02c07b8bbfebd4d6475e09c",
       outputIndex: 0,
     });
     expect(AEGIS_V7_MAINNET.refs.marker).toEqual({
-      txHash: "539a186e872766ba7ead19f445b7a2e118b87ff2c3c977b8facdda46dde9092b",
+      txHash: "239c25639661589b8943bba62558d1e293ef944e789e7ea03634987ad68b943f",
+      outputIndex: 0,
+    });
+    expect(AEGIS_V7_MAINNET.refs.lpToken).toEqual({
+      txHash: "bf5cd5c2c33f33f546f39826ea36aa9d40bc3158aee293546d1e4163d85f6bc3",
       outputIndex: 0,
     });
   });
 
-  it("pins the oracle observer (hash, ref, REGISTERED reward account — reg tx 3d6d55f5…)", () => {
-    expect(AEGIS_V7_MAINNET.observer.scriptHash).toBe("669d5a25489c00aab367c3b9b71630efd523623ca13bbe0e1bd59752");
+  it("derives the pool address from the pool_validator hash", () => {
+    expect(credentialToAddress("Mainnet", { type: "Script", hash: AEGIS_V7_MAINNET.poolValidatorHash })).toBe(
+      AEGIS_V7_MAINNET.poolAddress,
+    );
+  });
+
+  it("pins the rotated oracle observer (hash, ref, REGISTERED reward account — reg tx 387de8bd…)", () => {
+    expect(AEGIS_V7_MAINNET.observer.scriptHash).toBe("f6b8c654c582f7b8b57ae5f7c6066317e90846263391589878f88cac");
     expect(AEGIS_V7_MAINNET.observer.refUtxo).toEqual({
-      txHash: "69cb524f8311757b3989c056a7a92de394597e1f05c82d2bbbfa2dca02549fca",
+      txHash: "f01c779b5a13c41aa271e61642f3c7bf3c8c1ff047598679317b824dad80eb80",
       outputIndex: 0,
     });
     expect(
       credentialToRewardAddress("Mainnet", { type: "Script", hash: AEGIS_V7_MAINNET.observer.scriptHash }),
     ).toBe(AEGIS_V7_MAINNET.observer.rewardAddress);
+    expect(AEGIS_V7_MAINNET.observer.rewardAddress).toBe(
+      "stake178mt33j5ckp00w940tjl03sxvvt7jzzxyceezkyc0rugetqpcypmh",
+    );
   });
 
   it("pins the AegisSelf publisher + the ADA/USD barrier feed policy", () => {

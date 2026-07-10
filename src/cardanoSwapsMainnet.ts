@@ -1,9 +1,16 @@
-// Mainnet deployment constants — the 2026-07-08 ceremony (deployment.mainnet.json)
-// plus the chain-verified Aegis V7 coverage manifest. Every hash and ref UTxO here
-// was verified on-chain against Blockfrost before being pinned.
+// Mainnet deployment constants — the 2026-07-08 cardano-swaps ceremony
+// (deployment.mainnet.json) plus the ROTATED Aegis V7 coverage manifest
+// (redeployed 2026-07-10; the prior pool family shipped a defective observer
+// that embedded the preprod publisher VKH, so no mainnet feed could attest).
+// Every hash and ref UTxO here was verified on-chain against Blockfrost mainnet.
 //
-// Ceremony txs: spend ref 8ae2d109…#0, beacon ref b6125af1…#0, maker_stake ref
-// aa19c205…#0, maker_stake stake reg c220af41…, oracle_observer stake reg 3d6d55f5….
+// cardano-swaps ceremony txs (UNCHANGED): spend ref 8ae2d109…#0, beacon ref
+// b6125af1…#0, maker_stake ref aa19c205…#0, maker_stake stake reg c220af41….
+// Aegis V7 rotation proof: Barrier underwrite tx 17b64a52… minted the first
+// coverage marker and passed the observer withdraw-0; observer reward reg tx
+// 387de8bd…. The pool UTxO is identified by the AEGIS_POOL_V7 NFT (pool_nft
+// policy) at the pool_validator; a coverage policy is identified by the
+// AEGIS_POLICY marker (marker policy) at the policy_validator.
 
 import type { CardanoSwapsDeployment } from "./cardanoSwapsLifecycle.js";
 import type { OutputRef } from "./datum.js";
@@ -41,7 +48,7 @@ export interface AegisV7Mainnet {
   observer: {
     scriptHash: string;
     refUtxo: OutputRef;
-    /** Registered on-chain (tx 3d6d55f5…) — the withdraw-0 attestation validates. */
+    /** Registered on-chain (tx 387de8bd…) — the withdraw-0 attestation validates. */
     rewardAddress: string;
   };
   publisher: {
@@ -56,23 +63,23 @@ export interface AegisV7Mainnet {
 }
 
 export const AEGIS_V7_MAINNET: AegisV7Mainnet = {
-  poolValidatorHash: "4aad412f98302e6aa5aa5c27bf003cbe20361ab276fba919bfacd502",
-  poolAddress: "addr1w9926sf0nqczu6494fwz00cq8jlzqds6kfm0h2geh7kd2qs70dmj2",
-  poolNftPolicyId: "a48f89cf5a52226a2f8226b1af033507594ded136031575a3b028154",
+  poolValidatorHash: "cca5c1f2c6195cffe1b82b531417be423b0a3f91b7e741e03cbc6cff",
+  poolAddress: "addr1w8x2ts0jccv4ellphq44x9qhheprkz3ljxm7ws0q8j7xelcj85sg4",
+  poolNftPolicyId: "9cf48b68374e539babe1bd583151868d031c37a83443ee58b8b2571a",
   poolNftAssetNameHex: "41454749535f504f4f4c5f5637",
-  policyValidatorHash: "ccd5f3330fe223c12131543e93fa10b5e6e4acb334e454efd25331b3",
-  markerPolicyId: "f3247570b5bb33abadfbba2fc6e9b9d4918194b9b4146debcf88ab3e",
-  lpTokenPolicyId: "80c13796e6933eeb7322b095f6453be1dcd10caded381af949754b08",
+  policyValidatorHash: "f2557118860f37dfd6b3fa4a7c5f1a593761d3e1391418efaeb8cf2c",
+  markerPolicyId: "7778a648610ee4e87004c867fd40c277d159139d635453fce270f0ab",
+  lpTokenPolicyId: "ad155127c7022f435ec0b1be0992de0f72200c9a120f91a70fba2656",
   refs: {
-    poolValidator: { txHash: "fff6be5a24fe27198ae3646335367d29a4d6e480b842939bbc3d66d66d56b34e", outputIndex: 0 },
-    policyValidator: { txHash: "d27c1dcab43bbffd91941fb87280711f800362483bc0f3560a336cb9801d8d92", outputIndex: 0 },
-    marker: { txHash: "539a186e872766ba7ead19f445b7a2e118b87ff2c3c977b8facdda46dde9092b", outputIndex: 0 },
-    lpToken: { txHash: "3fb3d78475938273485999b8d4c58d630ef75f4599d47047887c7ca9216f78fd", outputIndex: 0 },
+    poolValidator: { txHash: "971bd46c6c97372dde752eb4222afbc237278de8d39a6efd4af85ac1933d487f", outputIndex: 0 },
+    policyValidator: { txHash: "97e95a829240c7ea5612f6aa353fc0efe3e93776c02c07b8bbfebd4d6475e09c", outputIndex: 0 },
+    marker: { txHash: "239c25639661589b8943bba62558d1e293ef944e789e7ea03634987ad68b943f", outputIndex: 0 },
+    lpToken: { txHash: "bf5cd5c2c33f33f546f39826ea36aa9d40bc3158aee293546d1e4163d85f6bc3", outputIndex: 0 },
   },
   observer: {
-    scriptHash: "669d5a25489c00aab367c3b9b71630efd523623ca13bbe0e1bd59752",
-    refUtxo: { txHash: "69cb524f8311757b3989c056a7a92de394597e1f05c82d2bbbfa2dca02549fca", outputIndex: 0 },
-    rewardAddress: "stake179nf6k39fzwqp24nvlpmndckxrha2gmz8jsnh0swr02ew5sx750sa",
+    scriptHash: "f6b8c654c582f7b8b57ae5f7c6066317e90846263391589878f88cac",
+    refUtxo: { txHash: "f01c779b5a13c41aa271e61642f3c7bf3c8c1ff047598679317b824dad80eb80", outputIndex: 0 },
+    rewardAddress: "stake178mt33j5ckp00w940tjl03sxvvt7jzzxyceezkyc0rugetqpcypmh",
   },
   publisher: {
     address:
