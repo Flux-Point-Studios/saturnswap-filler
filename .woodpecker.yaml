@@ -1,0 +1,15 @@
+# Woodpecker CI for Flux-Point-Studios/saturnswap-filler (TypeScript lib, npm).
+# Fresh config (no prior GitHub Actions). Runs on PRs and main pushes and reports
+# the ci/woodpecker/pr/woodpecker commit status so branch protection can gate merges.
+# Library repo — no deploy, just typecheck + tests.
+when:
+  - event: [push, pull_request]
+    branch: main
+
+steps:
+  - name: build-test
+    image: node:20-bookworm
+    commands:
+      - npm ci
+      - npm run typecheck
+      - npm test
