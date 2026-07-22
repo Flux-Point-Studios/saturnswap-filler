@@ -12,7 +12,9 @@ import { credentialToAddress, type UTxO } from "@lucid-evolution/lucid";
 import { bytesToHex, hexToBytes } from "../../src/cbor.js";
 import { unit } from "../../src/discovery.js";
 import { planOneWayMultiFill, maxAdaOfferTake } from "../../src/cardanoSwapsMultiFill.js";
-import type { OneWayOrder } from "../../src/cardanoSwapsFill.js";
+import { cardanoSwapsComposable, type OneWayOrder } from "../../src/cardanoSwapsFill.js";
+import { minUtxoLovelace } from "../../src/minUtxo.js";
+import { CARDANO_SWAPS_COINS_PER_UTXO_BYTE } from "../../src/cardanoSwapsLifecycle.js";
 import { CARDANO_SWAPS_MAINNET } from "../../src/cardanoSwapsMainnet.js";
 
 const FIXTURE = JSON.parse(
@@ -115,6 +117,22 @@ describe("min-UTxO floor guard on ADA-offering orders", () => {
     ).toThrow(/min-UTxO floor/);
     const ok = planOneWayMultiFill([{ order: buyOrder, orderUtxo: mkUtxo(buyOrder), offerTaken: cap }]);
     expect(ok.fills).toHaveLength(1);
+    // The cap must be safe ON-CHAIN, not just off-chain: build the REAL continuation at
+    // `cap` and assert its lovelace clears its true min-UTxO floor (the MEDIUM the red-team
+    // caught — the old cap was undersized by the ask-quantity CBOR-byte delta).
+    const cont = cardanoSwapsComposable({ order: buyOrder, orderUtxo: mkUtxo(buyOrder), offerTaken: cap }).fill.outputs[0]!;
+    const floor = minUtxoLovelace(
+      { addressBech32: cont.address, assets: cont.value, inlineDatumHex: cont.datum },
+      CARDANO_SWAPS_COINS_PER_UTXO_BYTE,
+    );
+    expect(cont.value["lovelace"]!).toBeGreaterThanOrEqual(floor);
+    // And one lovelace more of take must breach it (cap is the true boundary, not conservative slack).
+    const contOver = cardanoSwapsComposable({ order: buyOrder, orderUtxo: mkUtxo(buyOrder), offerTaken: cap + 1n }).fill.outputs[0]!;
+    const floorOver = minUtxoLovelace(
+      { addressBech32: contOver.address, assets: contOver.value, inlineDatumHex: contOver.datum },
+      CARDANO_SWAPS_COINS_PER_UTXO_BYTE,
+    );
+    expect(contOver.value["lovelace"]!).toBeLessThan(floorOver);
   });
 
   it("token-offering orders cap at their full reserve", () => {

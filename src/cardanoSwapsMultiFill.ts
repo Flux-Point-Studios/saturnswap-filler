@@ -45,16 +45,26 @@ export interface MultiFillPlan {
  *  phase-1; computeOneWayFill does not — BEACON_VOLUME_EXPERIMENT.md §4). */
 export function maxAdaOfferTake(order: OneWayOrder, coinsPerUtxoByte: bigint = CARDANO_SWAPS_COINS_PER_UTXO_BYTE): bigint {
   if (order.datum.offerId !== "") return quantityOf(order.scriptValue, order.datum.offerId, order.datum.offerName);
-  // Size the floor against a representative continuation (same assets plus the
-  // ask tokens, prev_input populated) so the datum/value bytes are realistic.
-  const probe = cardanoSwapsComposable({ order, orderUtxo: probeUtxo(order), offerTaken: 1n });
-  const cont = probe.fill.outputs[0]!;
-  const floor = minUtxoLovelace(
-    { addressBech32: cont.address, assets: cont.value, inlineDatumHex: cont.datum },
-    coinsPerUtxoByte,
-  );
-  const available = order.scriptValue.lovelace - floor;
-  return available > 0n ? available : 0n;
+  // The continuation's min-UTxO floor GROWS with the take: the ask token it gains widens
+  // as its quantity's CBOR byte-width grows (1→3→5→9 bytes). A floor sized at a tiny probe
+  // take therefore under-reserves, and the ledger rejects the maxed fill with
+  // OutputTooSmall. Size the floor against the REAL continuation at the candidate take and
+  // iterate down to the fixpoint where the offer left after the take still covers that
+  // take's own floor. Monotone floor + few byte-width breakpoints ⇒ converges in 1-2 steps.
+  const floorAt = (take: bigint): bigint => {
+    const cont = cardanoSwapsComposable({ order, orderUtxo: probeUtxo(order), offerTaken: take }).fill.outputs[0]!;
+    return minUtxoLovelace(
+      { addressBech32: cont.address, assets: cont.value, inlineDatumHex: cont.datum },
+      coinsPerUtxoByte,
+    );
+  };
+  let take = order.scriptValue.lovelace - floorAt(1n); // optimistic upper bound (smallest floor)
+  for (let i = 0; i < 6 && take > 0n; i++) {
+    const safe = order.scriptValue.lovelace - floorAt(take); // real floor at this candidate take
+    if (take <= safe) return take; // offer left (lovelace − take) covers the continuation's floor
+    take = safe; // over-reserved; shrink to what fits and re-measure
+  }
+  return take > 0n ? take : 0n;
 }
 
 function probeUtxo(order: OneWayOrder): UTxO {
@@ -70,6 +80,15 @@ export function planOneWayMultiFill(legs: OneWayFillLeg[]): MultiFillPlan {
   if (legs.length === 0) throw new Error("at least one fill leg required");
   const seen = new Set<string>();
   for (const leg of legs) {
+    // The spent input (leg.orderUtxo) and the continuation's prev_input (derived from
+    // leg.order.utxo) MUST be the same oref, or the validator can't find its continuation
+    // (phase-2 fail, collateral burned) or two legs spend one input (phase-1 reject).
+    // Discovery keeps them equal; assert it so a refactored/hand-built caller can't drift.
+    if (leg.orderUtxo.txHash !== leg.order.utxo.txHash || leg.orderUtxo.outputIndex !== leg.order.utxo.outputIndex)
+      throw new Error(
+        `leg.orderUtxo ${leg.orderUtxo.txHash}#${leg.orderUtxo.outputIndex} must equal leg.order.utxo ` +
+          `${leg.order.utxo.txHash}#${leg.order.utxo.outputIndex} (spent input and continuation prev_input must match)`,
+      );
     const ref = `${leg.order.utxo.txHash}#${leg.order.utxo.outputIndex}`;
     if (seen.has(ref)) throw new Error(`duplicate order in batch: ${ref} (a UTxO can be spent once per tx)`);
     seen.add(ref);
@@ -99,6 +118,24 @@ export function planOneWayMultiFill(legs: OneWayFillLeg[]): MultiFillPlan {
     }
     const f = computeOneWayFill(leg.order, leg.offerTaken);
     const { fill } = cardanoSwapsComposable({ order: leg.order, orderUtxo: leg.orderUtxo, offerTaken: leg.offerTaken });
+
+    // Universal continuation floor check. maxAdaOfferTake sizes the ADA-offer case, but a
+    // token↔token fill (or any continuation whose lovelace does NOT strictly rise) can gain
+    // an ask token that lifts its min-UTxO above its fixed lovelace → OutputTooSmall on-chain,
+    // wedging the whole batch. Reject off-chain with the shortfall regardless of offer asset.
+    const cont = fill.outputs[0];
+    if (cont) {
+      const floor = minUtxoLovelace(
+        { addressBech32: cont.address, assets: cont.value, inlineDatumHex: cont.datum },
+        CARDANO_SWAPS_COINS_PER_UTXO_BYTE,
+      );
+      const contLovelace = cont.value["lovelace"] ?? 0n;
+      if (contLovelace < floor)
+        throw new Error(
+          `continuation of ${leg.order.utxo.txHash}#${leg.order.utxo.outputIndex} would be below its ` +
+            `min-UTxO floor (${contLovelace} < ${floor}); reduce offerTaken`,
+        );
+    }
     fills.push(fill);
 
     // Taker gains the offer, spends the ask; ADA legs fold into netAdaOutflow.
