@@ -72,10 +72,34 @@ block slot were ours; a realistic event targets a fraction of it.
 - **Capital confirmation:** the ADA-only-taker proof means the loop's working capital is the
   resting maker inventory + one leg of float — intermediate tokens never need to be held.
 
+## On-chain preprod confirmation (2026-07-22) — the emulator number holds
+
+Ran the ladder against the **already-deployed preprod canonical ref scripts** (the same
+parameterless validators as mainnet: spend `1d6cff26…`, beacon `c4d7d117…`), seeding real
+paired one-way orders and evaluating each K's ex-units through Blockfrost preprod (whose
+evaluator is the node's). Measured against the **real deployed validators**:
+
+- **Mainnet ceiling = K=26, mem-bound — confirmed.** Preprod measured K=26 mem `13,459,533`
+  (fits mainnet's 14,000,000) and K=27 mem `14,135,313` (**exceeds** it). This matches the
+  emulator exactly.
+- **Why the preprod ladder printed "27 ok":** preprod's `max_tx_ex_mem` is **16,500,000**
+  (not mainnet's 14,000,000), so preprod accepted K=27; size then caps it at K=27 (K=28 =
+  16,902 B > 16,384). Apply mainnet's 14M mem to the measured per-K numbers ⇒ **26**.
+- **The ceiling tx SETTLED on-chain:** a **K=26** multi-fill confirmed on preprod
+  ([`4e35931b…`](https://preprod.cardanoscan.io/transaction/4e35931bf507d608020eed2f9ce849e7eae40774cb0c368426be91b0770c376f)),
+  and an earlier **K=4** ([`358ccaba…`](https://preprod.cardanoscan.io/transaction/358ccaba111533696cbc3c757f1019811b66cfeb414081913a7f5d9d7ee611a3)) —
+  real canonical fills composed atomically, not just built.
+- **Assembler robustness gap found + fixed:** lucid auto-collateral undershoots the ledger's
+  150%-of-fee requirement on high-ex-unit multi-fills (`InsufficientCollateral` at submit for
+  K=26). `assembleOneWayMultiFillTx` now takes an optional `collateralLovelace` to set it
+  explicitly; the mainnet event runner must pass ≥ ~1.5× the expected fee with headroom.
+
+Harness: `preprod-e2e/bench-ceiling-preprod.mjs` (seed / ladder / submit), rerunnable per pair.
+
 ## Caveats (honest edges)
 
-- **Emulator, not chain.** Protocol params and evaluator match mainnet, but the preprod
-  on-chain submit (BEACON_VOLUME_EXPERIMENT.md §6.7) is still the final word.
+- **Now chain-confirmed** (above): K=26 settled on preprod against the real validators;
+  mainnet's tighter 14M mem is the binding limit, so 26 is the mainnet ceiling.
 - Datum/value sizes shift with real policy ids/asset names/amounts — K_max can move ±1 for a
   given pair; the K=27 miss was ~30 mem units, so treat 26 as "this pair's" ceiling and
   re-run the ladder per launch pair.

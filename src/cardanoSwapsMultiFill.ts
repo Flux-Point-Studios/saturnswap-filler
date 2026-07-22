@@ -155,6 +155,11 @@ export interface AssembleOneWayMultiFillArgs {
   deployment: CardanoSwapsDeployment;
   plan: MultiFillPlan;
   changeAddress: string;
+  /** Total collateral (lovelace) to set explicitly. Auto-collateral undershoots the
+   *  ledger's 150%-of-fee requirement on high-ex-unit multi-fills (InsufficientCollateral
+   *  at submit), so a K≈20+ batch should pass a value ≥ 1.5× the expected fee with headroom
+   *  (e.g. 10_000_000n). Omitted → lucid auto-selects (fine for small K). */
+  collateralLovelace?: bigint;
 }
 
 /**
@@ -179,7 +184,11 @@ export async function assembleOneWayMultiFillTx(
       tx = tx.pay.ToAddressWithData(out.address, { kind: "inline", value: out.datum }, out.value as Assets);
     }
   }
-  const signBuilder = await tx.complete({ changeAddress: args.changeAddress });
+  const signBuilder = await tx.complete(
+    args.collateralLovelace !== undefined
+      ? { changeAddress: args.changeAddress, setCollateral: args.collateralLovelace }
+      : { changeAddress: args.changeAddress },
+  );
   const unsignedCbor = signBuilder.toCBOR();
   return { unsignedCbor, txHash: signBuilder.toHash(), txSizeBytes: unsignedCbor.length / 2 };
 }
