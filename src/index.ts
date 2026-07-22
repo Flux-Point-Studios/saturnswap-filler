@@ -38,3 +38,4 @@ export * from "./insuredSwap.js";
 // constants, and AegisSelf rotating-feed discovery / observer attestation.
 export * from "./cardanoSwapsMainnet.js";
 export * from "./aegisFeed.js";
+export * from "./fillPacker.js";
