@@ -1,0 +1,323 @@
+{
+  "method": "Lucid Evolution Emulator (mainnet-equal protocol params), ceremony script bytes hash-verified, CIP-33 refs, paired 1:1 one-way orders, ADA-only taker",
+  "perFillTakeLovelaceEquivalent": "1000000",
+  "kMax": 26,
+  "bestFillsPerBlock": {
+    "k": 4,
+    "ok": true,
+    "sizeBytes": 2466,
+    "mem": "1581018",
+    "steps": "535096058",
+    "mainnetFeeLovelace": "461219",
+    "txPerBlock": 36.54176804541768,
+    "fillsPerBlock": 146.16707218167073,
+    "grossNotionalLovelace": "4000000"
+  },
+  "nettingProof": {
+    "k": 26,
+    "txHash": "7d93b5d7753832a48b4f3a45084ab407b81229bb79886c4c1249c8e534add782"
+  },
+  "rows": [
+    {
+      "k": 1,
+      "ok": true,
+      "sizeBytes": 893,
+      "mem": "393732",
+      "steps": "126032612",
+      "mainnetFeeLovelace": "294007",
+      "txPerBlock": 100.90929451287793,
+      "fillsPerBlock": 100.90929451287793,
+      "grossNotionalLovelace": "1000000"
+    },
+    {
+      "k": 2,
+      "ok": true,
+      "sizeBytes": 1388,
+      "mem": "768813",
+      "steps": "250527729",
+      "mainnetFeeLovelace": "346406",
+      "txPerBlock": 64.92219020172911,
+      "fillsPerBlock": 129.84438040345822,
+      "grossNotionalLovelace": "2000000"
+    },
+    {
+      "k": 3,
+      "ok": true,
+      "sizeBytes": 1971,
+      "mem": "1184241",
+      "steps": "393580641",
+      "mainnetFeeLovelace": "406342",
+      "txPerBlock": 45.71892440385591,
+      "fillsPerBlock": 137.15677321156772,
+      "grossNotionalLovelace": "3000000"
+    },
+    {
+      "k": 4,
+      "ok": true,
+      "sizeBytes": 2466,
+      "mem": "1581018",
+      "steps": "535096058",
+      "mainnetFeeLovelace": "461219",
+      "txPerBlock": 36.54176804541768,
+      "fillsPerBlock": 146.16707218167073,
+      "grossNotionalLovelace": "4000000"
+    },
+    {
+      "k": 5,
+      "ok": true,
+      "sizeBytes": 3049,
+      "mem": "2013748",
+      "steps": "692402677",
+      "mainnetFeeLovelace": "523182",
+      "txPerBlock": 28.88492587384956,
+      "fillsPerBlock": 144.4246293692478,
+      "grossNotionalLovelace": "5000000"
+    },
+    {
+      "k": 6,
+      "ok": true,
+      "sizeBytes": 3544,
+      "mem": "2436615",
+      "steps": "853704987",
+      "mainnetFeeLovelace": "580991",
+      "txPerBlock": 23.42729667104545,
+      "fillsPerBlock": 140.5637800262727,
+      "grossNotionalLovelace": "6000000"
+    },
+    {
+      "k": 7,
+      "ok": true,
+      "sizeBytes": 4127,
+      "mem": "2891041",
+      "steps": "1028031906",
+      "mainnetFeeLovelace": "645433",
+      "txPerBlock": 19.454649105024956,
+      "fillsPerBlock": 136.1825437351747,
+      "grossNotionalLovelace": "7000000"
+    },
+    {
+      "k": 8,
+      "ok": true,
+      "sizeBytes": 4622,
+      "mem": "3331210",
+      "steps": "1203587923",
+      "mainnetFeeLovelace": "705267",
+      "txPerBlock": 16.61698295389094,
+      "fillsPerBlock": 132.93586363112752,
+      "grossNotionalLovelace": "8000000"
+    },
+    {
+      "k": 9,
+      "ok": true,
+      "sizeBytes": 5205,
+      "mem": "3807332",
+      "steps": "1394935142",
+      "mainnetFeeLovelace": "772188",
+      "txPerBlock": 14.33758416274812,
+      "fillsPerBlock": 129.03825746473308,
+      "grossNotionalLovelace": "9000000"
+    },
+    {
+      "k": 10,
+      "ok": true,
+      "sizeBytes": 5700,
+      "mem": "4269197",
+      "steps": "1587511459",
+      "mainnetFeeLovelace": "834502",
+      "txPerBlock": 12.598334258700932,
+      "fillsPerBlock": 125.98334258700932,
+      "grossNotionalLovelace": "10000000"
+    },
+    {
+      "k": 11,
+      "ok": true,
+      "sizeBytes": 6283,
+      "mem": "4767015",
+      "steps": "1795878978",
+      "mainnetFeeLovelace": "903901",
+      "txPerBlock": 11.136607892294176,
+      "fillsPerBlock": 122.50268681523593,
+      "grossNotionalLovelace": "11000000"
+    },
+    {
+      "k": 12,
+      "ok": true,
+      "sizeBytes": 6778,
+      "mem": "5250576",
+      "steps": "2005475595",
+      "mainnetFeeLovelace": "968695",
+      "txPerBlock": 9.972696775699232,
+      "fillsPerBlock": 119.67236130839078,
+      "grossNotionalLovelace": "12000000"
+    },
+    {
+      "k": 13,
+      "ok": true,
+      "sizeBytes": 7361,
+      "mem": "5770090",
+      "steps": "2230863414",
+      "mainnetFeeLovelace": "1040574",
+      "txPerBlock": 8.965138732603734,
+      "fillsPerBlock": 116.54680352384854,
+      "grossNotionalLovelace": "13000000"
+    },
+    {
+      "k": 14,
+      "ok": true,
+      "sizeBytes": 7856,
+      "mem": "6275347",
+      "steps": "2457480331",
+      "mainnetFeeLovelace": "1107846",
+      "txPerBlock": 8.138417120865249,
+      "fillsPerBlock": 113.93783969211349,
+      "grossNotionalLovelace": "14000000"
+    },
+    {
+      "k": 15,
+      "ok": true,
+      "sizeBytes": 8439,
+      "mem": "6820951",
+      "steps": "2702655043",
+      "mainnetFeeLovelace": "1182656",
+      "txPerBlock": 7.400130494567153,
+      "fillsPerBlock": 111.0019574185073,
+      "grossNotionalLovelace": "15000000"
+    },
+    {
+      "k": 16,
+      "ok": true,
+      "sizeBytes": 8934,
+      "mem": "7352298",
+      "steps": "2949058853",
+      "mainnetFeeLovelace": "1252861",
+      "txPerBlock": 6.781824642005542,
+      "fillsPerBlock": 108.50919427208868,
+      "grossNotionalLovelace": "16000000"
+    },
+    {
+      "k": 17,
+      "ok": true,
+      "sizeBytes": 9517,
+      "mem": "7915204",
+      "steps": "3208487272",
+      "mainnetFeeLovelace": "1329697",
+      "txPerBlock": 6.233467146507664,
+      "fillsPerBlock": 105.96894149063029,
+      "grossNotionalLovelace": "17000000"
+    },
+    {
+      "k": 18,
+      "ok": true,
+      "sizeBytes": 10012,
+      "mem": "8463853",
+      "steps": "3469144789",
+      "mainnetFeeLovelace": "1401928",
+      "txPerBlock": 5.765109621084772,
+      "fillsPerBlock": 103.7719731795259,
+      "grossNotionalLovelace": "18000000"
+    },
+    {
+      "k": 19,
+      "ok": true,
+      "sizeBytes": 10595,
+      "mem": "9048455",
+      "steps": "3745593508",
+      "mainnetFeeLovelace": "1481243",
+      "txPerBlock": 5.3396077169834735,
+      "fillsPerBlock": 101.452546622686,
+      "grossNotionalLovelace": "19000000"
+    },
+    {
+      "k": 20,
+      "ok": true,
+      "sizeBytes": 11090,
+      "mem": "9618800",
+      "steps": "4023271325",
+      "mainnetFeeLovelace": "1555952",
+      "txPerBlock": 4.971079100661947,
+      "fillsPerBlock": 99.42158201323893,
+      "grossNotionalLovelace": "20000000"
+    },
+    {
+      "k": 21,
+      "ok": true,
+      "sizeBytes": 11673,
+      "mem": "10225098",
+      "steps": "4316740344",
+      "mainnetFeeLovelace": "1637747",
+      "txPerBlock": 4.63312555451679,
+      "fillsPerBlock": 97.29563664485259,
+      "grossNotionalLovelace": "21000000"
+    },
+    {
+      "k": 22,
+      "ok": true,
+      "sizeBytes": 12168,
+      "mem": "10817139",
+      "steps": "4611438461",
+      "mainnetFeeLovelace": "1714935",
+      "txPerBlock": 4.33704150432552,
+      "fillsPerBlock": 95.41491309516144,
+      "grossNotionalLovelace": "22000000"
+    },
+    {
+      "k": 23,
+      "ok": true,
+      "sizeBytes": 12753,
+      "mem": "11445133",
+      "steps": "4921927780",
+      "mainnetFeeLovelace": "1799297",
+      "txPerBlock": 4.063448488876446,
+      "fillsPerBlock": 93.45931524415826,
+      "grossNotionalLovelace": "23000000"
+    },
+    {
+      "k": 24,
+      "ok": true,
+      "sizeBytes": 13250,
+      "mem": "12058870",
+      "steps": "5233646197",
+      "mainnetFeeLovelace": "1879052",
+      "txPerBlock": 3.8214275950606447,
+      "fillsPerBlock": 91.71426228145548,
+      "grossNotionalLovelace": "24000000"
+    },
+    {
+      "k": 25,
+      "ok": true,
+      "sizeBytes": 13834,
+      "mem": "12708560",
+      "steps": "5561155816",
+      "mainnetFeeLovelace": "1965849",
+      "txPerBlock": 3.59637468571875,
+      "fillsPerBlock": 89.90936714296876,
+      "grossNotionalLovelace": "25000000"
+    },
+    {
+      "k": 26,
+      "ok": true,
+      "sizeBytes": 14330,
+      "mem": "13343993",
+      "steps": "5889894533",
+      "mainnetFeeLovelace": "2048040",
+      "txPerBlock": 3.395646541367365,
+      "fillsPerBlock": 88.28681007555149,
+      "grossNotionalLovelace": "26000000"
+    },
+    {
+      "k": 27,
+      "ok": false,
+      "error": "{ Complete: \"failed script execution Spend[27] execution went over budget Mem -30 CPU 3769425857\" }"
+    },
+    {
+      "k": 28,
+      "ok": false,
+      "error": "{ Complete: \"failed script execution Spend[27] execution went over budget Mem -4354 CPU 3673417515\" }"
+    },
+    {
+      "k": 29,
+      "ok": false,
+      "error": "{ Complete: \"failed script execution Spend[27] execution went over budget Mem -883 CPU 3627109421\" }"
+    }
+  ]
+}

@@ -83,9 +83,13 @@ infrastructure demonstration, not organic demand.
 ## 3. Where "~27 swaps per tx" comes from, and what the ceiling actually is
 
 The figure in circulation is **"25 swaps/tx" — an *emulator* benchmark from the canonical
-cardano-swaps research, never measured on-chain** (C_ARCHITECTURE §7 R1 says this verbatim). No
-repo in this stack contains a measured number for the deployed ceremony scripts. Treat 25–27 as
-folklore until benchmarked. What we can pin down:
+cardano-swaps research, never measured on-chain** (C_ARCHITECTURE §7 R1 says this verbatim).
+
+> **MEASURED (2026-07-22): K_max = 26**, mem-bound (K=27 exceeds the 14M-mem tx budget by ~30
+> units; size was only 14,330 of 16,384 B). Measured in a mainnet-parameter emulator against the
+> exact ceremony script bytes, real beacon-policy creates, ADA-only taker. Full ladder, method,
+> and fee curve: `COMPOSE_CEILING_BENCHMARK.md`; harness: `scripts/bench-compose-ceiling.ts`.
+> The derivations below are kept for the reasoning; the numbers that follow are measured.
 
 **Size bound [computed].** Per one-way fill, with both scripts as CIP-33 reference inputs (zero
 validator bytes in the tx):
@@ -98,23 +102,23 @@ validator bytes in the tx):
 ≈ **~630 B per fill** → (16,384 B − ~1.2 KB overhead for collateral/change/fee/refs/witness) /
 630 ≈ **~24 fills, size-bound**. ADA-offer orders are slightly cheaper (empty policy id).
 
-**Ex-unit bound [estimate — the one number to measure].** Each of K validator executions
-(a) deserializes a script context whose size grows with K and (b) datum-scans up to K
-continuation outputs. Per-fill cost is therefore ≈ `a + b·K`; whole-tx cost ≈ `a·K + b·K²`.
-Whether the 14M-mem / 10B-step tx budget caps K below or above the ~24 size bound is exactly what
-the emulator's "25" suggests but nothing here has measured. **Both constraints converge in the
-mid-20s; "27" is optimistic by a hair; the real K_max needs one benchmark run.**
+**Ex-unit bound [measured].** Each of K validator executions (a) deserializes a script context
+whose size grows with K and (b) datum-scans up to K continuation outputs. Per-fill cost is
+therefore ≈ `a + b·K`; whole-tx cost ≈ `a·K + b·K²`. Measured fit:
+**`mem(K) ≈ 384k·K + 5.0k·K²`**, which puts K=27 at ~13.99M of the 14M budget — the wall is
+exactly where the quadratic says. **K_max = 26, mem-bound; "27" was optimistic by one.**
 
 **The non-obvious consequence of the quadratic term — two different optima:**
 
-- **The stunt tx** (do once, screenshot): one K_max tx — "~25 orders settled atomically in a
-  single Cardano transaction, including closed multi-hop cycles." This is the composability
-  headline no AMM-batcher venue can produce.
+- **The stunt tx** (do once, screenshot): one K_max tx — "**26** orders settled atomically in a
+  single Cardano transaction, including closed multi-hop cycles funded purely by intra-tx
+  netting" [measured, incl. an emulator-submitted 26-fill round-trip by an ADA-only taker].
+  This is the composability headline no AMM-batcher venue can produce. Large K is also
+  fee-per-fill optimal (~0.079 ADA/fill at K=26 vs 0.294 at K=1).
 - **The volume record** (the 5M number): the metric is **fills per BLOCK**, and because per-fill
-  ex-unit cost *rises* with K, medium batches likely maximize sustained throughput. Block budget
-  is 62M mem / 20B steps / 90,112 B [protocol params]: two maxed compose txs already exhaust the
-  step budget, while ~4–6 medium txs (K ≈ 8–12) can settle *more total fills* per block for
-  *fewer* ex-units per fill. The benchmark (§6) resolves the optimal K*.
+  ex-unit cost *rises* with K, small-to-medium batches maximize sustained throughput.
+  **Measured optimum: K=4 → ~146 fills/block** chain ceiling (36.5 such txs/block, steps- and
+  size-co-bound), vs 88 fills/block for maxed K=26 txs.
 
 Do both. Don't conflate them — the 27-in-one-tx is a capability proof; the volume record is a
 throughput proof, and it probably doesn't want maximal txs.
@@ -145,13 +149,13 @@ transaction; the taker ends ≈ flat, ~25 orders' notional settles, all 25 relis
 | lever | value |
 |---|---|
 | avg fill notional | 1,000 ADA (tunable — volume scales linearly) |
-| fills per tx | ~25 (stunt) / K* ≈ 8–12 (sustained, to be measured) |
-| gross volume per tx (K=25) | ~25,000 ADA |
+| fills per tx | **26 (measured K_max)** / K=4 when racing the clock (measured fills/block optimum) |
+| gross volume per tx (K=26) | ~26,000 ADA |
 | cadence, conservative | 1 compose tx per ~20 s block |
-| **volume per hour** | **~4.5M ADA** (≈180 blocks × 25k) — 5M in ~67 min; 2 txs/block or intra-block continuation-chaining halves that |
-| working capital | ~25–50k ADA equivalent (25 orders × ~1k + headroom). **Velocity ≈ 180 inventory turns/hour** — that's the headline mechanic: volume = inventory × turns |
-| network fee per maxed tx | ≤ ~2.6 ADA (size 16,384×44 + 155,381 base + 14M mem × 0.0577 + 10B steps × 0.0000721 + ~0.15 ref-script fee) |
-| **total fees for 5M ADA** | **~200 txs × ~2.6 ≈ ~520 ADA ≈ 0.01% of volume** |
+| **volume per hour** | **~4.7M ADA** (≈180 blocks × 26k) — 5M in ~64 min on a single lane; extra K=4 lanes or intra-block continuation-chaining shorten that at will (chain ceiling ~146 fills/block) |
+| working capital | ~25–50k ADA equivalent (26 orders × ~1k + headroom). **Velocity ≈ 180 inventory turns/hour** — that's the headline mechanic: volume = inventory × turns. Confirmed: the taker needs ZERO intermediate tokens (netting proof) |
+| network fee per maxed tx | **~2.05 ADA [measured]** (14,330 B, 13.34M mem, 5.89B steps, + 67,530-lovelace ref-script fee — fills reference only the spend script) |
+| **total fees for 5M ADA** | **~193 txs × ~2.05 ≈ ~395 ADA ≈ 0.008% of volume** |
 | protocol fee | 0 — the validator has no fee path |
 
 **Planner guardrails (needed, small):**
@@ -186,17 +190,20 @@ credential; audit us."*
 
 ## 6. Build/measure list (in order)
 
-1. **Ceiling benchmark — the gating number.** No preprod `CardanoSwapsDeployment` exists in this
-   repo, so either (a) run a preprod ceremony (ref scripts + maker_stake reg, mirroring
-   `deployment.mainnet.json`) or (b) benchmark in an emulator against the ceremony script bytes
-   fetched from the mainnet ref UTxOs. Seed ~30 mini orders, build K = 1, 2, 4, 8, 12, 16, 20,
-   24, 28 fill txs, evaluate (Ogmios `evaluateTx` / `aiken tx simulate`), record mem/steps/bytes.
-   Deliverables: K_max, the per-fill cost fit `a + b·K`, fee(K), and fills-per-block-optimal K*.
-2. **Multi-fill assembler in this repo.** `assembleCardanoSwapsTx` covers create/reprice/cancel;
-   fills currently compose only via ADAM-OC's guard router. Add a standalone
-   `assembleCardanoSwapsFills(fills: ComposableFill[])` (N `collectFrom` + N continuations +
-   change; no withdrawals, no signers) with the §4 guardrails and K-cap from (1) — keeps the
-   experiment runnable by any operator, per the no-ADAM-privileges rule.
+1. **Ceiling benchmark — the gating number. ✅ DONE (emulator tier).**
+   `scripts/bench-compose-ceiling.ts` + `fixtures/cardano-swaps-mainnet-scripts.json`
+   (ceremony bytes, hash-verified in CI) + `fixtures/compose-ceiling-results.json`.
+   Results: **K_max = 26 (mem-bound), fills/block optimum K=4 → ~146, fee 2.05 ADA @ K=26,
+   `mem(K) ≈ 384k·K + 5.0k·K²`**, 26-fill ADA-only-taker netting proof submitted. See
+   `COMPOSE_CEILING_BENCHMARK.md`. Remaining for this item: the **on-chain preprod submit**
+   (needs a preprod ceremony — ref scripts + maker_stake reg mirroring
+   `deployment.mainnet.json`), then one mainnet stunt tx.
+2. **Multi-fill assembler in this repo. ✅ DONE.** `src/cardanoSwapsMultiFill.ts`:
+   `planOneWayMultiFill` (merged signed net deltas, duplicate-spend rejection, min-UTxO floor
+   guard via `maxAdaOfferTake`) + `assembleOneWayMultiFillTx` (K `Swap` inputs via the CIP-33
+   spend ref, K continuations, change; no mint/withdrawals/signers) —
+   `test/unit/cardano-swaps-multi-fill.test.ts`. Runnable by any operator, per the
+   no-ADAM-privileges rule. Follow-up: cap batches at the measured K per pair.
 3. **Netting check in ADAM-OC** (out of this repo's scope, tracked here): confirm
    `agentComposeFills` funds the merged signed `tokenDelta`, not per-fill gross; add the
    bin-packer against the measured budget.
@@ -216,7 +223,10 @@ credential; audit us."*
 
 - **Self-trading optics** — mitigated only by the up-front disclosure + on-chain labeling (§5);
   never present the number as organic demand.
-- **Publishing an unmeasured ceiling** — do not say "27" (or any K) publicly before §6.1 runs.
+- **Publishing the ceiling at the wrong confidence tier** — the number is **26**, measured in a
+  mainnet-parameter emulator against the ceremony bytes; run the preprod/mainnet submit (§6.1
+  remainder) before putting it in a headline, and re-ladder per launch pair (the K=27 miss was
+  ~30 mem units — real asset names/values can shift K_max by ±1).
 - **Unaudited v2 expiration surface** — keep `expiration = None` on all experiment orders
   (C_ARCHITECTURE §4.2/§7).
 - **Ref-script UTxOs are load-bearing infra** — a spent/moved ref UTxO breaks every fill mid-event.
