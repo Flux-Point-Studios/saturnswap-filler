@@ -3,3 +3,8 @@ dist/
 *.log
 .DS_Store
 *.tsbuildinfo
+
+# Preprod E2E harnesses carry live signing keys — never commit them.
+**/deployment.json
+**/*.skey
+**/*.vkey
