@@ -133,8 +133,15 @@ function assertExpiration(expiration: bigint | null): void {
  *  its LegacySwapDatum mirror is this 12-field datum, and `is_spendable_continuation_datum`
  *  reads `asset1_price` (token per lovelace — the BID ceiling) and `asset2_price`
  *  (lovelace per token — the ASK floor) against the ceremony's two floors. */
+/** What a two-way create actually reads from a deployment — the four fields a
+ *  per-client (MMaaS) caller can pin without inventing operator-only values. */
+export type TwoWayCreateDeployment = Pick<
+  CardanoSwapsDeployment,
+  "network" | "dappHash" | "beaconPolicy" | "beaconRefUtxo"
+>;
+
 export interface PlanCreateTwoWaySwapArgs {
-  deployment: CardanoSwapsDeployment;
+  deployment: TwoWayCreateDeployment;
   asset1: AssetClass;
   asset2: AssetClass;
   /** Asset2 per Asset1. Priced at or above the ceremony's min_asset1_price. */
@@ -211,7 +218,7 @@ export function planCreateTwoWaySwap(args: PlanCreateTwoWaySwapArgs): CardanoSwa
   for (const n of [names.pair, names.a1, names.a2]) value[deployment.beaconPolicy + n] = 1n;
 
   const datumHex = encodeTwoWaySwapDatumHex(datum);
-  const orderAddress = orderAddressFor(deployment, args.stake);
+  const orderAddress = scriptStakeAddress(deployment.network, deployment.dappHash, args.stake);
 
   return {
     action: "create",
