@@ -110,4 +110,57 @@ describe("planCreateTwoWaySwap", () => {
   it("refuses a pair whose legs are the same asset", () => {
     expect(() => created({ asset1: TOK, asset2: TOK })).toThrow(/differ/i);
   });
+
+  /* The sorter and the beacon derivations compare BYTES (case-insensitive hex,
+   * optional 0x); a guard that compares strings lets a byte-identical pair through
+   * to a two-beacon mint the policy refuses at submit time. */
+  it("refuses a same-asset pair however the hex is spelled", () => {
+    const UPPER = { policyId: TOK.policyId.toUpperCase(), assetName: TOK.assetName };
+    const PREFIXED = { policyId: "0x" + TOK.policyId, assetName: TOK.assetName };
+    expect(() => created({ asset1: UPPER, asset2: TOK })).toThrow(/differ/i);
+    expect(() => created({ asset1: PREFIXED, asset2: TOK })).toThrow(/differ/i);
+  });
+
+  it("names the CALLER'S price argument when the sort transposed the pair", () => {
+    expect(() =>
+      created({ asset1: TOK, asset2: ADA, asset1Price: A2, asset2Price: { num: 0n, den: 13n } }),
+    ).toThrow(/asset2Price/);
+  });
+
+  /* extract_ask_and_offer_quantity (two_way_swap/utils.ak) hard-errors "No
+   * extraneous assets allowed in the UTxO" for anything that is not the beacon,
+   * ADA, asset1 or asset2 — after the client has signed. Refuse it at planning. */
+  it("refuses inventory that is not asset1 or asset2", () => {
+    const JUNK = { policyId: "ff".repeat(28), assetName: "4a554e4b", amount: 7n };
+    expect(() => created({ inventory: [{ ...TOK, amount: 4_000_000n }, JUNK] })).toThrow(/inventory/i);
+  });
+
+  it("refuses a lovelace-policy entry with a non-empty asset name", () => {
+    expect(() => created({ inventory: [{ policyId: "", assetName: "aabb", amount: 7n }] })).toThrow(/inventory/i);
+  });
+
+  it("refuses zero and negative inventory amounts", () => {
+    expect(() => created({ inventory: [{ ...TOK, amount: 0n }] })).toThrow(/amount/i);
+    expect(() => created({ inventory: [{ ...TOK, amount: -1n }] })).toThrow(/amount/i);
+    expect(() => created({ inventory: [{ ...ADA, amount: -1_900_000n }] })).toThrow(/amount/i);
+  });
+
+  it("refuses an empty inventory rather than resting a funded-with-nothing order", () => {
+    expect(() => created({ inventory: [] })).toThrow(/inventory/i);
+    expect(() => created({ inventory: undefined })).toThrow(/inventory/i);
+  });
+
+  it("keys inventory under the pair's own spelling, whatever case the caller used", () => {
+    const out = created({
+      inventory: [{ policyId: TOK.policyId.toUpperCase(), assetName: TOK.assetName, amount: 4_000_000n }],
+    }).outputs[0]!;
+    expect(out.assets[TOK.policyId + TOK.assetName]).toBe(4_000_000n);
+    expect(out.assets[TOK.policyId.toUpperCase() + TOK.assetName]).toBeUndefined();
+  });
+
+  it("accepts a pure-bid order funded with ADA alone", () => {
+    const out = created({ inventory: [{ ...ADA, amount: 5_000_000n }] }).outputs[0]!;
+    expect(out.assets["lovelace"]).toBeGreaterThanOrEqual(7_000_000n);
+    expect(out.assets[TOK.policyId + TOK.assetName]).toBeUndefined();
+  });
 });

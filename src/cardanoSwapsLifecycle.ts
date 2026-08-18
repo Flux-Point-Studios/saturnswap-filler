@@ -24,7 +24,7 @@ import { PConstr, plutusToHex } from "./plutus.js";
 import { minUtxoLovelace } from "./minUtxo.js";
 import type { OutputRef, Credential } from "./datum.js";
 import type { ChainValue } from "./discovery.js";
-import { pairBeacon, offerBeacon, askBeacon, assetBeacon, sortPair, type AssetClass } from "./cardanoSwapsBeacons.js";
+import { pairBeacon, offerBeacon, askBeacon, assetBeacon, sortPair, compareAsset, type AssetClass } from "./cardanoSwapsBeacons.js";
 import type { Rational } from "./cardanoSwapsRatio.js";
 import { chainValueToAssets, type OneWayOrder } from "./cardanoSwapsFill.js";
 import {
@@ -156,17 +156,20 @@ export function planCreateTwoWaySwap(args: PlanCreateTwoWaySwapArgs): CardanoSwa
   const expiration = args.expiration ?? null;
   assertExpiration(expiration);
 
+  for (const [name, p] of [["asset1Price", args.asset1Price], ["asset2Price", args.asset2Price]] as const)
+    if (p.num <= 0n || p.den <= 0n) throw new Error(`${name} num & den must be > 0`);
+
   // The pair is sorted here rather than trusted from the caller: the beacon
   // derivation and the validator both read asset1/asset2 positionally, so a
   // transposed pair mints names the policy refuses and prices the wrong leg.
+  // Equality is byte-level, like the sort — string equality would pass a pair
+  // spelled differently through to a two-beacon mint the policy refuses.
   const [a1, a2] = sortPair(args.asset1, args.asset2);
-  if (a1.policyId === a2.policyId && a1.assetName === a2.assetName)
+  if (compareAsset(a1.policyId, a1.assetName, a2.policyId, a2.assetName) === 0)
     throw new Error("asset1 and asset2 must differ");
   const swapped = a1 !== args.asset1;
   const asset1Price = swapped ? args.asset2Price : args.asset1Price;
   const asset2Price = swapped ? args.asset1Price : args.asset2Price;
-  for (const [name, p] of [["asset1Price", asset1Price], ["asset2Price", asset2Price]] as const)
-    if (p.num <= 0n || p.den <= 0n) throw new Error(`${name} num & den must be > 0`);
 
   const names = {
     pair: pairBeacon(a1, a2),
@@ -188,10 +191,22 @@ export function planCreateTwoWaySwap(args: PlanCreateTwoWaySwapArgs): CardanoSwa
     expiration,
   };
 
+  // The beacon policy's extract_ask_and_offer_quantity hard-errors on ANY asset
+  // that is not the beacon, ADA, asset1 or asset2 — at phase 2, after the client
+  // signed. An empty inventory is the opposite trap: the order lands, rests and
+  // quotes while funding nothing. Both are refused here, where the error is cheap.
+  const inventory = args.inventory ?? [];
+  if (inventory.length === 0)
+    throw new Error("inventory is empty — the order would land funded with nothing; pass the asset1/asset2 amounts it should rest with");
   const value: Assets = { lovelace: args.depositLovelace ?? 2_000_000n };
-  for (const inv of args.inventory ?? []) {
-    if (inv.policyId === "") value["lovelace"] = (value["lovelace"] ?? 0n) + inv.amount;
-    else value[inv.policyId + inv.assetName] = (value[inv.policyId + inv.assetName] ?? 0n) + inv.amount;
+  for (const inv of inventory) {
+    if (inv.amount <= 0n)
+      throw new Error(`inventory amount for '${inv.policyId}.${inv.assetName}' must be > 0, got ${inv.amount}`);
+    const side = [a1, a2].find((a) => compareAsset(a.policyId, a.assetName, inv.policyId, inv.assetName) === 0);
+    if (!side)
+      throw new Error(`inventory asset '${inv.policyId}.${inv.assetName}' is neither asset1 nor asset2 — the beacon policy refuses extraneous assets`);
+    const unit = side.policyId === "" ? "lovelace" : side.policyId + side.assetName;
+    value[unit] = (value[unit] ?? 0n) + inv.amount;
   }
   for (const n of [names.pair, names.a1, names.a2]) value[deployment.beaconPolicy + n] = 1n;
 
