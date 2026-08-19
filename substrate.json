@@ -1,0 +1,98 @@
+{
+  "repo": "saturnswap-filler",
+  "primitives": [
+    {
+      "id": "plutus-cbor-codec",
+      "name": "Plutus/CBOR codec",
+      "desc": "Hand-rolled CBOR reader/writer, Plutus Data encode/decode normalising both constructor forms, min-UTxO sizing and script-data hashing. Depends on no wallet library, so it is usable server-side, in a browser and in a keeper.",
+      "kind": "toolkit",
+      "paths": [
+        "src/cbor.ts",
+        "src/plutus.ts",
+        "src/datum.ts",
+        "src/datumV3.ts",
+        "src/minUtxo.ts",
+        "src/scriptDataHash.ts",
+        "src/ratio.ts",
+        "src/sort.ts"
+      ],
+      "consumes": [],
+      "status": "live"
+    },
+    {
+      "id": "cardano-swaps-beacons",
+      "name": "cardano-swaps beacon derivation",
+      "desc": "Pair/asset beacon names and the byte-level pair sort the validator reads positionally. Two-way asset beacons are UNPREFIXED where the one-way derivation prefixes 0x01/0x02.",
+      "kind": "engine",
+      "paths": [
+        "src/cardanoSwapsBeacons.ts",
+        "src/cardanoSwapsRatio.ts",
+        "src/cardanoSwapsDatum.ts"
+      ],
+      "consumes": [
+        "plutus-cbor-codec"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "cardano-swaps-planners",
+      "name": "cardano-swaps lifecycle planners",
+      "desc": "Pure recipe builders for one-way and two-way create, cancel and fill: outputs, mints, redeemers, reference inputs. Returns a recipe rather than a transaction, so the same plan is assembled by a browser wallet or a keeper.",
+      "kind": "engine",
+      "paths": [
+        "src/cardanoSwapsLifecycle.ts",
+        "src/cardanoSwapsFill.ts",
+        "src/cancel.ts",
+        "src/fill.ts",
+        "src/fillV3.ts"
+      ],
+      "consumes": [
+        "cardano-swaps-beacons",
+        "plutus-cbor-codec"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "multi-fill-packer",
+      "name": "exUnit bin-packer for beacon-book multi-fills",
+      "desc": "Packs multiple order fills into one transaction against a measured exUnit budget, so a taker settles several resting orders at once instead of one per transaction.",
+      "kind": "engine",
+      "paths": [
+        "src/cardanoSwapsMultiFill.ts",
+        "src/fillPacker.ts"
+      ],
+      "consumes": [
+        "cardano-swaps-planners"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "beacon-book-discovery",
+      "name": "Beacon order-book discovery",
+      "desc": "Reads resting orders from a chain index by beacon policy and decodes them into a book. One-way and two-way are structurally similar but DIFFERENT protocols with different datum shapes and beacon derivations \u2014 a reader must decode the one it is querying.",
+      "kind": "pipeline",
+      "paths": [
+        "src/discovery.ts",
+        "src/cardanoSwapsDiscovery.ts"
+      ],
+      "consumes": [
+        "cardano-swaps-beacons"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "insured-swap-composer",
+      "name": "Aegis-insured swap composer",
+      "desc": "Splices Aegis parametric coverage into a swap transaction, so a trade and its cover settle atomically.",
+      "kind": "engine",
+      "paths": [
+        "src/insuredSwap.ts",
+        "src/aegisFeed.ts"
+      ],
+      "consumes": [
+        "cardano-swaps-planners"
+      ],
+      "status": "live"
+    }
+  ]
+}
