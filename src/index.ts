@@ -28,6 +28,10 @@ export * from "./cardanoSwapsFill.js";
 export * from "./cardanoSwapsLifecycle.js";
 export * from "./cardanoSwapsDiscovery.js";
 export * from "./cardanoSwapsMultiFill.js";
+// The recipe -> cardano-cli translator. Exported because the shell executor must CONSUME it
+// rather than re-derive the shape: two artifacts that both look right and disagree in
+// production is what this seam keeps producing.
+export * from "./recipeToCliArgs.js";
 
 // Insured swap (tx-cart): compose a V2 cardano-swaps fill + a V3 Aegis
 // underwrite into ONE tx, ONE signature, NO Conway treasury_donation (key 22).

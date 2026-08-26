@@ -8,3 +8,16 @@ dist/
 **/deployment.json
 **/*.skey
 **/*.vkey
+
+# Local scratch harnesses and their operational output. Keys are already covered above, but a
+# PUBLIC repo should not be one `git add -A` away from publishing preprod ceremony params,
+# reference-script deployments or benchmark runs either.
+/run/
+/preprod-e2e/
+/preprod-ceremony/
+/preprod-refscripts/
+/aegis-e2e/
+/scripts/v4-bench/
+/scripts/v4-mainnet/
+*.addr
+*.tgz
