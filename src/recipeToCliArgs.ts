@@ -11,7 +11,7 @@
  * Being a pure function of the recipe is the point: what the tests assert is exactly what runs.
  */
 
-import { validatorToScriptHash } from "@lucid-evolution/lucid";
+import { getAddressDetails, validatorToScriptHash } from "@lucid-evolution/lucid";
 import type { OutputRef } from "./datum.js";
 import type { CardanoSwapsRecipe } from "./cardanoSwapsLifecycle.js";
 
@@ -142,6 +142,30 @@ export function recipeToCliArgs(input: RecipeToCliArgsInput): RecipeCliArgs {
       throw new Error(
         `withdrawal ${i} for ${w.stakeScriptHash} states amount ${String(w.amountLovelace)} — a withdrawal ` +
           `must carry a non-negative bigint amount, because the ledger drains the balance exactly. Nothing was built.`,
+      );
+    // --withdrawal is what SELECTS the credential the ledger drains, so the address must NAME the
+    // credential this leg withdraws from. It arrives from caller-supplied config and was taken
+    // verbatim, while a carried SCRIPT two lines below is re-hashed against that same credential —
+    // the bytes were checked and the selector was not.
+    //
+    // Verified rather than derived: deriving needs a network this function is not given, and the
+    // address already encodes the hash, so decoding it asserts the property with nothing added.
+    let rewardCred: string | undefined;
+    try {
+      rewardCred = getAddressDetails(src.rewardAddress).stakeCredential?.hash;
+    } catch {
+      rewardCred = undefined;
+    }
+    if (rewardCred === undefined)
+      throw new Error(
+        `the reward address for withdrawal ${w.stakeScriptHash} could not be decoded, so the command would ` +
+          `withdraw from a credential nobody has checked. Nothing was built.`,
+      );
+    if (rewardCred !== w.stakeScriptHash)
+      throw new Error(
+        `the reward address supplied for withdrawal ${w.stakeScriptHash} names credential ${rewardCred} — the ` +
+          `command would withdraw from one credential while witnessing another, so the order's own staking ` +
+          `credential would never appear in the withdrawals map. Nothing was built.`,
       );
     args.push("--withdrawal", `${src.rewardAddress}+${w.amountLovelace}`);
     if (src.refUtxo) {

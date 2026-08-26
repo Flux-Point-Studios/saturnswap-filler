@@ -92,6 +92,24 @@ describe("recipeToCliArgs — the withdrawals actually reach the command line", 
         for (const m of joined().matchAll(/--withdrawal (\S+)/g)) expect(m[1]).toMatch(/\+0$/);
     });
 
+    it("REFUSES a reward address that names a different credential than the leg withdraws from", () => {
+        // --withdrawal is what SELECTS which credential the ledger drains. This function took the
+        // bech32 verbatim from caller-supplied sources and never checked it against
+        // w.stakeScriptHash — while re-hashing a carried SCRIPT against that same hash two lines
+        // later. One copy-paste in a per-client params file, or one stale entry after a re-band
+        // moves a client to a new ceremony, and the command withdraws from one credential while
+        // witnessing another: the order's real staking credential never appears in the withdrawals
+        // map, staking_credential_approves fails, and the keeper's collateral is consumed by a
+        // phase-2 failure whose error names neither credential.
+        const wrongReward = "stake_test17qez0c2rsvpvdqpswfeadhpwxfs7fdsvxex4addseaasz5g8z86ce"; // decodes to BOUND_HASH
+        expect(() =>
+            build({
+                recipe: { ...reband, withdrawals: [{ stakeScriptHash: BEACON_POLICY, redeemerHex: UPDATE_SWAPS_HEX, amountLovelace: 0n }] },
+                sources: { [BEACON_POLICY]: { ...sources[BEACON_POLICY]!, rewardAddress: wrongReward } },
+            }),
+        ).toThrow(/reward address|does not name|different credential/i);
+    });
+
     it("carries a NON-ZERO amount into argv", () => {
         const args = joined({
             recipe: { ...reband, withdrawals: [{ stakeScriptHash: BOUND_HASH, redeemerHex: "d87980", amountLovelace: 4_000_000n }] },
@@ -239,7 +257,10 @@ describe("recipeToCliArgs — a carried withdrawal script is verified, not trust
     /** An always-true PlutusV3 script and the credential it produces. */
     const CARRIED_SCRIPT = "5253010100322253330034a229309b2b2b9a01";
     const CARRIED_HASH = "bf6ac8c003b32b7e570d3d863f9b1813b98264ef1cb0f91d58f4bac7";
-    const CARRIED_REWARD = "stake_test17qez0c2rsvpvdqpswfeadhpwxfs7fdsvxex4addseaasz5g8z86ce";
+    // Derived FROM CARRIED_HASH, not pasted. This literal used to be BOUND_HASH's reward address
+        // on a source keyed to CARRIED_HASH — a fixture that withdrew from one credential while
+        // witnessing another, and 331 tests passed over it because nothing checked the selector.
+        const CARRIED_REWARD = "stake_test17zlk4jxqqwejkljhp57cv0umrqfmnqnyauwtp7gatr6t43c4rc2cq";
 
     const carried = (cborHex = CARRIED_SCRIPT, plutusVersion: "v2" | "v3" = "v3") => ({
         recipe: {
