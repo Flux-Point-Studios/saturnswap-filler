@@ -83,8 +83,21 @@ describe("recipeToCliArgs — the withdrawals actually reach the command line", 
         expect(s).toContain(`${sources[BOUND_HASH]!.rewardAddress}+0`);
     });
 
-    it("withdraws exactly zero — a non-zero amount is unbuildable once rewards accrue", () => {
+    it("withdraws the amount the RECIPE states, not a hardcoded zero", () => {
+        // This test used to assert the opposite — "withdraws exactly zero" — which was true of the
+        // code and false of the ledger. Conway drains the reward balance EXACTLY, so a hardcoded
+        // zero is correct only while the credential has never delegated. cardano-cli is the
+        // MANDATED rail for every transaction in this stack; if the amount does not reach argv, the
+        // fix reaches the browser and misses the path that actually carries mainnet funds.
         for (const m of joined().matchAll(/--withdrawal (\S+)/g)) expect(m[1]).toMatch(/\+0$/);
+    });
+
+    it("carries a NON-ZERO amount into argv", () => {
+        const args = joined({
+            recipe: { ...reband, withdrawals: [{ stakeScriptHash: BOUND_HASH, redeemerHex: "d87980", amountLovelace: 4_000_000n }] },
+        });
+        expect(args).toMatch(/--withdrawal \S+\+4000000\b/);
+        expect(args).not.toMatch(/--withdrawal \S+\+0\b/);
     });
 
     // A script reached by reference and a script attached from a file take DIFFERENT flags. Getting

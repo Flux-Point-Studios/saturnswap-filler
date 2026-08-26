@@ -130,7 +130,20 @@ export function recipeToCliArgs(input: RecipeToCliArgsInput): RecipeCliArgs {
           `so the transaction would be built without a staking execution the validator requires`,
       );
     const redeemer = stage(`r_wdl_${i}`, w.redeemerHex);
-    args.push("--withdrawal", `${src.rewardAddress}+0`);
+    // The amount the RECIPE states, never a hardcoded zero. Conway drains the reward balance
+    // EXACTLY, so a zero is correct only while the credential has never delegated — and cardano-cli
+    // is the mandated rail for every transaction in this stack, so a fix that stops at the browser
+    // misses the path that actually carries mainnet funds.
+    //
+    // `typeof` rather than `< 0n`: an undefined amount is not less than zero, so a leg missing the
+    // field would sail past a comparison and land in argv as "addr+undefined". The package ships
+    // .ts and is reached through casts, so undefined here is a real shape, not a hypothetical.
+    if (typeof w.amountLovelace !== "bigint" || w.amountLovelace < 0n)
+      throw new Error(
+        `withdrawal ${i} for ${w.stakeScriptHash} states amount ${String(w.amountLovelace)} — a withdrawal ` +
+          `must carry a non-negative bigint amount, because the ledger drains the balance exactly. Nothing was built.`,
+      );
+    args.push("--withdrawal", `${src.rewardAddress}+${w.amountLovelace}`);
     if (src.refUtxo) {
       args.push(
         "--withdrawal-tx-in-reference", ref(src.refUtxo),

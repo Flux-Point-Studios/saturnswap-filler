@@ -676,8 +676,15 @@ export async function assembleCardanoSwapsTx(
       );
     }
     const rewardAddr = credentialToRewardAddress(deployment.network, { type: "Script", hash: w.stakeScriptHash });
-    if (w.amountLovelace < 0n)
-      throw new Error(`the recipe withdraws ${w.amountLovelace} from ${w.stakeScriptHash} — a withdrawal cannot be negative. Nothing was built.`);
+    // `typeof` first: `undefined < 0n` is false, so a leg missing the field slips past a bare
+    // comparison and reaches CML as `new(address, undefined)`, which fails inside the WASM binding
+    // with a message naming no credential. This package ships raw .ts and is reached through casts,
+    // so undefined here is a shape that can actually arrive.
+    if (typeof w.amountLovelace !== "bigint" || w.amountLovelace < 0n)
+      throw new Error(
+        `the recipe withdraws ${String(w.amountLovelace)} from ${w.stakeScriptHash} — a withdrawal must carry a ` +
+          `non-negative bigint amount, because the ledger drains the balance exactly. Nothing was built.`,
+      );
     tx = tx.withdraw(rewardAddr, w.amountLovelace, w.redeemerHex);
   }
   for (const pkh of recipe.requiredSigners) tx = tx.addSignerKey(pkh);
