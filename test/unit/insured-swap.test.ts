@@ -472,7 +472,7 @@ describe("Barrier — oracle attestation leg", () => {
       oracle: oracleLeg(NOW),
     });
     expect(plan.oracleRequired).toBe(true);
-    expect(plan.withdrawals).toEqual([{ scriptHash: OBSERVER_HASH, redeemerCbor: ATTESTATION_CBOR }]);
+    expect(plan.withdrawals).toEqual([{ scriptHash: OBSERVER_HASH, redeemerCbor: ATTESTATION_CBOR, amountLovelace: 0n }]);
     expect(plan.referenceInputs).toEqual([
       ...SWAP_REFS,
       { txHash: "ee".repeat(32), outputIndex: 0 },
@@ -523,7 +523,7 @@ describe("Barrier — oracle attestation leg", () => {
       oracle: leg,
     });
     expect(plan.validity.invalidHereafter).toBe(leg.feedValidUntilMs);
-    expect(plan.withdrawals).toEqual([{ scriptHash: OBSERVER_HASH, redeemerCbor: ATTESTATION_CBOR }]);
+    expect(plan.withdrawals).toEqual([{ scriptHash: OBSERVER_HASH, redeemerCbor: ATTESTATION_CBOR, amountLovelace: 0n }]);
   });
 
   it("names the FEED (not the order expiration) when the feed's valid_until refuses a future-pinned start", () => {

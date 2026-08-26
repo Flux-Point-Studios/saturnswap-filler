@@ -15,6 +15,7 @@
 import {
   credentialToAddress,
   credentialToRewardAddress,
+  validatorToScriptHash,
   type Network,
   type LucidEvolution,
   type UTxO,
@@ -42,6 +43,11 @@ export const CARDANO_SWAPS_COINS_PER_UTXO_BYTE = 4310n;
 
 /** maker_stake ignores its withdrawal redeemer, so any Data works — use unit. */
 export const MAKER_STAKE_REDEEMER_HEX = plutusToHex(PConstr(0, []));
+
+/** A client's bound stake script ignores its withdrawal redeemer too, but a script credential in
+ *  the withdrawals map must still carry one. Same encoding as above, different script — named
+ *  separately so a reader does not conclude the maker script is what ran. */
+export const BOUND_STAKE_REDEEMER_HEX = plutusToHex(PConstr(0, []));
 
 export interface CardanoSwapsDeployment {
   network: Network;
@@ -74,10 +80,25 @@ export interface CsRecipeMintGroup {
   redeemerHex: string;
   assets: Array<{ unit: string; quantity: bigint }>;
 }
-/** A withdraw-0 of a staking script (the classic owner-auth trick). */
+/**
+ * A withdrawal from a staking script — the classic owner-auth trick, where the script runs because
+ * its credential appears in the withdrawals map at all, and the AMOUNT is incidental to that.
+ *
+ * The amount is incidental but not free to get wrong: the ledger requires a withdrawal to drain the
+ * credential's reward balance EXACTLY. Zero is correct precisely while that balance is zero, and
+ * the transaction is refused outright the moment it is not.
+ *
+ * `amountLovelace` is REQUIRED rather than optional-defaulting-to-zero, deliberately. A default of
+ * zero would leave every call site that was never revisited emitting exactly the stale withdrawal
+ * this field exists to prevent, and would do it silently — the transaction still BUILDS, because
+ * cardano-api's queryStateForBalancedTx never queries a reward account. Requiring it makes the
+ * compiler name every site instead.
+ */
 export interface CsWithdrawal {
   stakeScriptHash: string;
   redeemerHex: string;
+  /** Exactly the credential's reward balance at build time. `0n` when it holds nothing. */
+  amountLovelace: bigint;
 }
 export interface CsSpendLeg {
   orderRef: OutputRef;
@@ -240,6 +261,121 @@ export function planCreateTwoWaySwap(args: PlanCreateTwoWaySwapArgs): CardanoSwa
 }
 
 
+// ---- re-band: move a resting two-way order to a different stake credential ----
+
+/** The two-way shape of `MakerOrder`. Structurally what `decodeTwoWayOrder` returns, minus the
+ *  raw UTxO, which nothing here needs. */
+export interface RebandOrder {
+  datum: TwoWaySwapDatum;
+  utxo: OutputRef;
+  scriptValue: ChainValue;
+  address: string;
+}
+
+export interface PlanRebandTwoWaySwapArgs {
+  deployment: CardanoSwapsDeployment;
+  /** the order resting at the OLD instance's address */
+  order: RebandOrder;
+  /** the OLD instance's stake script hash — it runs as a staking script and gates the spend */
+  fromStakeScriptHash: string;
+  /** where the continuation lands: the NEW instance's credential */
+  toStake: Credential;
+  newAsset1Price: Rational;
+  newAsset2Price: Rational;
+  /** the key that authorises it; `maker_stake_bound.withdraw` accepts it alone */
+  clientOwnerVkh: string;
+  /**
+   * The OLD instance credential's reward balance, read from chain at build time. `0n` unless the
+   * client has delegated their own vault — which `maker_stake_bound.publish` permits and only they
+   * can do. Required, because the ledger demands a withdrawal drain the balance EXACTLY, and a
+   * transaction carrying a stale zero still BUILDS and is only refused at submit.
+   */
+  fromRewardBalanceLovelace: bigint;
+  coinsPerUtxoByte?: bigint;
+}
+
+/**
+ * A reprice whose continuation moves house.
+ *
+ * A bound order's price floors live in its stake script, and that script's hash IS half of its
+ * address — so new floors mean a new address. Closing and recreating would burn three beacons,
+ * mint three more, and route the inventory back through a wallet in between.
+ *
+ * It is not required. `beacon_destination_check` asks only that a beacon output sit at
+ * `ScriptCredential(dapp_hash)` with SOME staking credential, and the owner redeemer does not
+ * compare the continuation's datum to the input's — only the taker path pins both. So the whole
+ * move is one spend: no mint, no burn, and the value never leaves the dApp script.
+ *
+ * Two staking executions are needed. The beacon policy runs under `UpdateSwaps` because the dApp
+ * validator demands it for `SpendWithStake`, and the OLD instance's own script runs because that is
+ * what "the address' staking credential must signal approval" means. The caller supplies the OLD
+ * script; the NEW one is only an address here and is not executed.
+ */
+export function planRebandTwoWaySwap(args: PlanRebandTwoWaySwapArgs): CardanoSwapsRecipe {
+  const { deployment, order } = args;
+  const coinsPerUtxoByte = args.coinsPerUtxoByte ?? CARDANO_SWAPS_COINS_PER_UTXO_BYTE;
+
+  for (const [name, p] of [["newAsset1Price", args.newAsset1Price], ["newAsset2Price", args.newAsset2Price]] as const)
+    if (p.num <= 0n || p.den <= 0n) throw new Error(`${name} num & den must be > 0`);
+
+  if (!/^[0-9a-fA-F]{56}$/.test(args.clientOwnerVkh))
+    throw new Error("clientOwnerVkh must be a 28-byte key hash — nothing else can authorise the move");
+  if (!/^[0-9a-fA-F]{56}$/.test(args.fromStakeScriptHash))
+    throw new Error("fromStakeScriptHash must be a 28-byte script hash");
+
+  // Moving to the credential it already sits at is a plain reprice. Planning it as a re-band would
+  // build a transaction that looks like a migration and changes no address, which is the kind of
+  // no-op that reads as success.
+  if (args.toStake.type === "script" && args.toStake.hash === args.fromStakeScriptHash)
+    throw new Error("toStake is the credential the order already rests at — that is a reprice, not a move");
+
+  // The three beacons are what make this a two-way order at all. If they are not in the value the
+  // caller has handed us something else, and copying it forward would produce an output the beacon
+  // policy refuses at phase 2 — after the client has signed.
+  const d = order.datum;
+  const required = [d.pairBeacon, d.asset1Beacon, d.asset2Beacon].map((n) => d.beaconId + n);
+  for (const unit of required)
+    if ((order.scriptValue.assets[unit] ?? 0n) !== 1n)
+      throw new Error(`the order is missing beacon ${unit} — this is not a resting two-way order`);
+
+  // Only the prices move. Every other field is checked by the beacon policy against the beacons in
+  // the value, so it is copied rather than recomputed: recomputing invites a transposed pair.
+  const contDatum: TwoWaySwapDatum = {
+    ...d,
+    asset1Price: args.newAsset1Price,
+    asset2Price: args.newAsset2Price,
+    prevInput: null,
+  };
+  const datumHex = encodeTwoWaySwapDatumHex(contDatum);
+  const toAddress = scriptStakeAddress(deployment.network, deployment.dappHash, args.toStake);
+
+  return {
+    action: "reprice",
+    outputs: [
+      {
+        role: "continuation",
+        addressBech32: toAddress,
+        assets: floorMinUtxo(chainValueToAssets(order.scriptValue), toAddress, coinsPerUtxoByte, datumHex),
+        inlineDatumHex: datumHex,
+      },
+    ],
+    mints: [],
+    withdrawals: [
+      // The beacon policy is a SHARED cardano-swaps script: no one delegates it, so its balance is
+      // structurally zero. ⚠️ If that ever stopped being true, every migrate and reprice on the
+      // whole two-way book would break at once, for every maker — not just MMaaS.
+      { stakeScriptHash: deployment.beaconPolicy, redeemerHex: UPDATE_SWAPS_HEX, amountLovelace: 0n },
+      // ...whereas THIS one is the client's own ceremony credential, and the client may delegate it.
+      { stakeScriptHash: args.fromStakeScriptHash, redeemerHex: BOUND_STAKE_REDEEMER_HEX, amountLovelace: args.fromRewardBalanceLovelace },
+    ],
+    spends: [{ orderRef: order.utxo, redeemerHex: SPEND_WITH_STAKE_HEX }],
+    requiredSigners: [args.clientOwnerVkh],
+    refInputs: [deployment.spendRefUtxo, deployment.beaconRefUtxo],
+    validToUnixMs: contDatum.expiration !== null ? Number(contDatum.expiration) : null,
+  };
+}
+
+
 function oneWayBeaconNames(offer: AssetClass, ask: AssetClass): { pair: string; offer: string; ask: string } {
   return {
     pair: pairBeacon(offer, ask),
@@ -371,8 +507,10 @@ export function planRepriceOneWaySwap(args: PlanRepriceOneWaySwapArgs): CardanoS
     ],
     mints: [], // net-zero beacons — the beacon policy runs as a staking script, not a mint
     withdrawals: [
-      { stakeScriptHash: deployment.beaconPolicy, redeemerHex: UPDATE_SWAPS_HEX },
-      { stakeScriptHash: deployment.makerStakeHash, redeemerHex: MAKER_STAKE_REDEEMER_HEX },
+      // Both SHARED deployment scripts — nobody delegates either, so both balances are
+      // structurally zero. See the note on the bound migrate for what a non-zero one would cost.
+      { stakeScriptHash: deployment.beaconPolicy, redeemerHex: UPDATE_SWAPS_HEX, amountLovelace: 0n },
+      { stakeScriptHash: deployment.makerStakeHash, redeemerHex: MAKER_STAKE_REDEEMER_HEX, amountLovelace: 0n },
     ],
     spends: [{ orderRef: order.utxo, redeemerHex: SPEND_WITH_STAKE_HEX }],
     requiredSigners: [deployment.adamBotPkh],
@@ -428,7 +566,8 @@ export function planCancelOneWaySwap(args: PlanCancelOneWaySwapArgs): CardanoSwa
         ],
       },
     ],
-    withdrawals: [{ stakeScriptHash: deployment.makerStakeHash, redeemerHex: MAKER_STAKE_REDEEMER_HEX }],
+    // Shared maker_stake, never delegated: structurally zero.
+    withdrawals: [{ stakeScriptHash: deployment.makerStakeHash, redeemerHex: MAKER_STAKE_REDEEMER_HEX, amountLovelace: 0n }],
     spends: [{ orderRef: order.utxo, redeemerHex: SPEND_WITH_MINT_HEX }],
     requiredSigners: [deployment.adamBotPkh],
     refInputs: makerStakeRefInputs(deployment),
@@ -438,6 +577,22 @@ export function planCancelOneWaySwap(args: PlanCancelOneWaySwapArgs): CardanoSwa
 
 // ---- thin @lucid-evolution assembler ----
 
+/**
+ * How a staking script named in `recipe.withdrawals` is REACHED inside the transaction.
+ *
+ * A withdraw-0 only authorises anything if the script itself is in the transaction. The deployment's
+ * own staking scripts arrive as reference inputs; a client's applied bound validator cannot — it is
+ * unique to that client's band, so no reference will ever be published for it — and must be
+ * attached. The CLI twin of this type is `CliScriptSource` in recipeToCliArgs.ts.
+ */
+export interface WithdrawalScriptSource {
+  script?: { type: "PlutusV2" | "PlutusV3"; script: string };
+  refUtxo?: OutputRef;
+}
+
+/** Keyed by stake script hash, as `CsWithdrawal` names them. */
+export type WithdrawalScriptSources = Record<string, WithdrawalScriptSource>;
+
 export interface AssembleCardanoSwapsTxArgs {
   lucid: LucidEvolution;
   deployment: CardanoSwapsDeployment;
@@ -445,6 +600,8 @@ export interface AssembleCardanoSwapsTxArgs {
   changeAddress: string;
   collateralUtxo: UTxO;
   fundingUtxos: UTxO[];
+  /** Sources for withdrawals the DEPLOYMENT does not already publish a reference for. */
+  withdrawalScripts?: WithdrawalScriptSources;
 }
 
 /**
@@ -483,9 +640,52 @@ export async function assembleCardanoSwapsTx(
     for (const m of group.assets) bag[m.unit] = m.quantity;
     tx = tx.mintAssets(bag, group.redeemerHex);
   }
+  // Every withdrawal must be REACHABLE — the script has to be in the transaction, attached or
+  // referenced, or the withdraw-0 authorises nothing. Refusing here names the credential; the same
+  // build without this check dies inside lucid with MISSING_SCRIPT, or offers the client a
+  // signature on a transaction the ledger will reject at phase 2.
+  const sources: WithdrawalScriptSources = {
+    [deployment.beaconPolicy]: { refUtxo: deployment.beaconRefUtxo },
+    ...(deployment.makerStakeRefUtxo ? { [deployment.makerStakeHash]: { refUtxo: deployment.makerStakeRefUtxo } } : {}),
+    ...(args.withdrawalScripts ?? {}),
+  };
+  const listedRefs = new Set(recipe.refInputs.map((r) => `${r.txHash}#${r.outputIndex}`));
   for (const w of recipe.withdrawals) {
+    const src = sources[w.stakeScriptHash];
+    if (!src || (!src.script && !src.refUtxo))
+      throw new Error(
+        `the recipe withdraws from staking script ${w.stakeScriptHash}, and this transaction carries no code ` +
+          `for it — attach the script, or name a reference input the recipe already lists. Nothing was built.`,
+      );
+    if (src.script) {
+      // Lucid's hash, not a hand-rolled one: it normalises the CBOR wrapping first, and the
+      // normalised bytes are what land in the witness set. Hashing the raw bytes would refuse a
+      // single-encoded script the ledger considers the same credential.
+      const hash = validatorToScriptHash(src.script);
+      if (hash !== w.stakeScriptHash)
+        throw new Error(
+          `the script supplied for withdrawal ${w.stakeScriptHash} hashes to ${hash}, so attaching it would ` +
+            `witness a different credential. Nothing was built.`,
+        );
+      tx = tx.attach.WithdrawalValidator(src.script);
+    } else if (!listedRefs.has(`${src.refUtxo!.txHash}#${src.refUtxo!.outputIndex}`)) {
+      throw new Error(
+        `the withdrawal source for ${w.stakeScriptHash} names reference input ` +
+          `${src.refUtxo!.txHash}#${src.refUtxo!.outputIndex}, which the recipe does not list — the built ` +
+          `transaction would not carry it. Nothing was built.`,
+      );
+    }
     const rewardAddr = credentialToRewardAddress(deployment.network, { type: "Script", hash: w.stakeScriptHash });
-    tx = tx.withdraw(rewardAddr, 0n, w.redeemerHex);
+    // `typeof` first: `undefined < 0n` is false, so a leg missing the field slips past a bare
+    // comparison and reaches CML as `new(address, undefined)`, which fails inside the WASM binding
+    // with a message naming no credential. This package ships raw .ts and is reached through casts,
+    // so undefined here is a shape that can actually arrive.
+    if (typeof w.amountLovelace !== "bigint" || w.amountLovelace < 0n)
+      throw new Error(
+        `the recipe withdraws ${String(w.amountLovelace)} from ${w.stakeScriptHash} — a withdrawal must carry a ` +
+          `non-negative bigint amount, because the ledger drains the balance exactly. Nothing was built.`,
+      );
+    tx = tx.withdraw(rewardAddr, w.amountLovelace, w.redeemerHex);
   }
   for (const pkh of recipe.requiredSigners) tx = tx.addSignerKey(pkh);
   if (recipe.validToUnixMs !== null) tx = tx.validTo(recipe.validToUnixMs);

@@ -115,10 +115,24 @@ export interface PlanMint {
   redeemerCbor: string;
 }
 
-/** A 0-lovelace staking-script withdrawal (the withdraw-0 trick). */
+/**
+ * A staking-script withdrawal — the withdraw-0 trick, but the amount is stated, not assumed.
+ *
+ * Conway drains a credential's reward balance EXACTLY, so a zero is correct only while the
+ * credential has never delegated. The Aegis oracle_observer credential this carries is REGISTERED
+ * on mainnet, and registration is the precondition for accruing: the day anyone delegates it to
+ * earn on an idle balance, every Barrier-class insured swap builds cleanly, is signed, and is
+ * refused by the node — with no field anywhere in the plan able to express the right amount.
+ *
+ * This is the same defect CsWithdrawal carries a fix for, in the same package, invisible to the
+ * compiler only because it is a different type. Required rather than optional-with-a-default, for
+ * the same reason: a default leaves un-updated call sites emitting the bug silently.
+ */
 export interface PlanWithdrawal {
   scriptHash: string;
   redeemerCbor: string;
+  /** how much this withdrawal drains, in lovelace */
+  amountLovelace: bigint;
 }
 
 /** The oracle leg a Barrier-class underwrite must carry: the live AegisSelf
@@ -277,7 +291,17 @@ function oracleLegs(
   if (!oracle) return { refs: [], withdrawals: [] };
   return {
     refs: [oracle.feedRefUtxo, oracle.observerRefUtxo],
-    withdrawals: [{ scriptHash: oracle.observerScriptHash, redeemerCbor: oracle.attestationRedeemerCbor }],
+    withdrawals: [
+      {
+        scriptHash: oracle.observerScriptHash,
+        redeemerCbor: oracle.attestationRedeemerCbor,
+        // Zero because nobody delegates the observer credential — a fact about how it is operated,
+        // not a property of the ledger. If that ever changes, this line is the one that breaks
+        // every Barrier-class swap, and it should be a caller-supplied balance rather than a
+        // constant here.
+        amountLovelace: 0n,
+      },
+    ],
   };
 }
 

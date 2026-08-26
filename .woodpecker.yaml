@@ -11,5 +11,10 @@ steps:
     image: node:20-bookworm
     commands:
       - npm ci
+      # This repo is PUBLIC, so a commit here is a publication. Runs against the full tree in CI
+      # (the pre-commit path checks only what is staged), because a value that reached the branch
+      # is already disclosed and the point is to catch it before anyone else does.
+      - git diff --name-only origin/main...HEAD > /tmp/changed || true
+      - bash scripts/check-public-hygiene.sh --files-from /tmp/changed
       - npm run typecheck
       - npm test

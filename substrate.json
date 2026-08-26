@@ -37,7 +37,7 @@
     {
       "id": "cardano-swaps-planners",
       "name": "cardano-swaps lifecycle planners",
-      "desc": "Pure recipe builders for one-way and two-way create, cancel and fill: outputs, mints, redeemers, reference inputs. Returns a recipe rather than a transaction, so the same plan is assembled by a browser wallet or a keeper.",
+      "desc": "Pure recipe builders for one-way and two-way create, reprice, cancel and fill: outputs, mints, redeemers, withdrawals, reference inputs. Returns a recipe rather than a transaction, so the same plan is assembled by a browser wallet or a keeper. A withdrawal carries an EXPLICIT amountLovelace — required, never defaulted — because the ledger makes a withdrawal drain its credential's reward balance exactly, and a stale zero still builds and is only refused at submit.",
       "kind": "engine",
       "paths": [
         "src/cardanoSwapsLifecycle.ts",
@@ -69,7 +69,7 @@
     {
       "id": "beacon-book-discovery",
       "name": "Beacon order-book discovery",
-      "desc": "Reads resting orders from a chain index by beacon policy and decodes them into a book. One-way and two-way are structurally similar but DIFFERENT protocols with different datum shapes and beacon derivations \u2014 a reader must decode the one it is querying.",
+      "desc": "Reads resting orders from a chain index by beacon policy and decodes them into a book. One-way and two-way are structurally similar but DIFFERENT protocols with different datum shapes and beacon derivations — a reader must decode the one it is querying.",
       "kind": "pipeline",
       "paths": [
         "src/discovery.ts",
